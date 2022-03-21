@@ -2193,6 +2193,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mpt"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "halo2_proofs",
+ "itertools",
+ "keccak256",
+ "num-bigint",
+ "num-traits",
+ "pairing_bn256",
+ "rand_xorshift",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2385,7 +2401,7 @@ dependencies = [
 [[package]]
 name = "pairing_bn256"
 version = "0.1.0"
-source = "git+https://github.com/appliedzkp/pairing#230e2c6b84c44e446d97efadc3be233ea610ea00"
+source = "git+https://github.com/appliedzkp/pairing#530f4c0022ed0fa430500e837ac7772e84bb4c2c"
 dependencies = [
  "ff 0.11.0",
  "group 0.11.0",
