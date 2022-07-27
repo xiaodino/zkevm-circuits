@@ -19,7 +19,7 @@ fn get_degree() -> usize {
         .expect("Cannot parse DEGREE env var as usize")
 }
 
-/// KeccakConfig
+/// KeccakPaddingConfig
 #[derive(Clone, Debug)]
 pub struct KeccakPaddingConfig<F> {
     q_enable: Selector,
@@ -41,7 +41,7 @@ pub(crate) struct KeccakPaddingRow<F: Field> {
     pub(crate) s_flags: [bool; KECCAK_RATE_IN_BYTES],
 }
 
-/// KeccakBitircuit
+/// KeccakPaddingCircuit
 #[derive(Default)]
 pub struct KeccakPaddingCircuit<F: Field> {
     inputs: Vec<KeccakPaddingRow<F>>,
@@ -94,6 +94,13 @@ impl<F: Field> KeccakPaddingConfig<F> {
 
         meta.create_gate("boolean checks", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
+
+            //TODO: could be removed if combined with keccak circuit?
+            for data_bit in d_bits {
+                let b = meta.query_advice(data_bit, Rotation::cur());
+                cb.require_boolean("input data bit", b);
+            }
+
             for s_flag in s_flags {
                 let s = meta.query_advice(s_flag, Rotation::cur());
                 cb.require_boolean("boolean state bit", s);
@@ -117,7 +124,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
                 let s_i_1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
                 let d_bit_0 = meta.query_advice(d_bits[8 * i], Rotation::cur());
-                constraints.push(("1 || 0*", (s_i - s_i_1) * (d_bit_0 - 1u64.expr())));
+                constraints.push(("begin with 1", (s_i - s_i_1) * (d_bit_0 - 1u64.expr())));
             }
             let s_last = meta.query_advice(s_flags[s_flags.len() - 1], Rotation::cur());
             let d_last = meta.query_advice(d_bits[KECCAK_RATE - 1], Rotation::cur());
@@ -152,11 +159,10 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
                 let len_i = meta.query_advice(d_lens[i], Rotation::cur());
                 let len_i_1 = meta.query_advice(d_lens[i - 1], Rotation::cur());
-                constraints.push(("len += !s_i", len_i - len_i_1 - not::expr(s_i)));
+                constraints.push(("len[i] = len[i-1] + !s_i", len_i - len_i_1 - not::expr(s_i)));
             }
 
             cb.add_constraints(constraints);
-
             cb.gate(meta.query_selector(q_enable))
         });
 
@@ -182,7 +188,6 @@ impl<F: Field> KeccakPaddingConfig<F> {
             }
 
             cb.add_constraints(constraints);
-
             cb.gate(meta.query_selector(q_enable))
         });
 
@@ -193,7 +198,6 @@ impl<F: Field> KeccakPaddingConfig<F> {
             let q_end = meta.query_advice(q_end, Rotation::cur());
 
             cb.require_equal("s_last == q_end", s_last, q_end);
-
             cb.gate(meta.query_selector(q_enable))
         });
 
@@ -213,7 +217,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
         &self,
         mut layouter: impl Layouter<F>,
         _size: usize,
-        keccak_row: &KeccakPaddingRow<F>,
+        keccak_padding_row: &KeccakPaddingRow<F>,
         randomness: F,
     ) -> Result<(), Error> {
         layouter.assign_region(
@@ -222,11 +226,11 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 self.set_row(
                     &mut region,
                     0,
-                    keccak_row.q_end,
-                    keccak_row.d_bits,
-                    keccak_row.d_lens,
-                    keccak_row.d_rlcs,
-                    keccak_row.s_flags,
+                    keccak_padding_row.q_end,
+                    keccak_padding_row.d_bits,
+                    keccak_padding_row.d_lens,
+                    keccak_padding_row.d_rlcs,
+                    keccak_padding_row.s_flags,
                     randomness,
                 )?;
                 Ok(())
@@ -292,7 +296,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
         )?;
 
         region.assign_advice(
-            || format!("assign q_end{}", offset),
+            || format!("assign randomness{}", offset),
             self.randomness,
             offset,
             || Ok(randomness),
@@ -361,8 +365,8 @@ mod tests {
             output.d_bits[i] = 0u8;
         }
         output.d_bits[s_bits_len] = 1;
-
         output.d_bits[KECCAK_RATE - 1] = 1;
+
         println!("{:?}", output.s_flags);
         println!("{:?}", output.d_bits);
         println!("{:?}", output.d_lens);
@@ -372,7 +376,7 @@ mod tests {
     static K: u32 = 8;
 
     #[test]
-    fn bit_keccak_simple() {
+    fn bit_keccak_len_0() {
         let input = generate_padding::<Fr>(0);
         verify::<Fr>(K, vec![input], true);
     }
@@ -414,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn bit_keccak_invalid_padding() {
+    fn bit_keccak_invalid_input_len() {
         // wrong len
         let mut input = generate_padding::<Fr>(123);
         input.d_lens[124] = 124;
