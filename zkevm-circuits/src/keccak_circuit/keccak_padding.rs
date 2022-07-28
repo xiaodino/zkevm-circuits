@@ -119,19 +119,22 @@ impl<F: Field> KeccakPaddingConfig<F> {
         meta.create_gate("padding bit checks", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
 
-            let mut constraints = vec![];
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
                 let s_i_1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
                 let d_bit_0 = meta.query_advice(d_bits[8 * i], Rotation::cur());
-                constraints.push(("begin with 1", (s_i - s_i_1) * (d_bit_0 - 1u64.expr())));
+                // constraints.push(("begin with 1", (s_i - s_i_1) * (d_bit_0 - 1u64.expr())));
+                let s_padding_start = s_i - s_i_1;
+                cb.condition(s_padding_start, |cb| {
+                    cb.require_equal("start with 1", d_bit_0, 1u64.expr());
+                });
             }
             let s_last = meta.query_advice(s_flags[s_flags.len() - 1], Rotation::cur());
             let d_last = meta.query_advice(d_bits[KECCAK_RATE - 1], Rotation::cur());
 
-            constraints.push(("end with 1", s_last * (d_last - 1u64.expr())));
-
-            cb.add_constraints(constraints);
+            cb.condition(s_last, |cb| {
+                cb.require_equal("end with 1", d_last, 1u64.expr())
+            });
             cb.gate(meta.query_selector(q_enable))
         });
 
@@ -147,22 +150,20 @@ impl<F: Field> KeccakPaddingConfig<F> {
                     .fold(sum_padding_bits, |sum, b| sum + s_i.clone() * b);
             }
 
-            cb.add_constraint("sum padding bits == 2", sum_padding_bits - 2u64.expr());
+            cb.require_equal("sum(padding_bits) == 2", sum_padding_bits, 2u64.expr());
             cb.gate(meta.query_selector(q_enable))
         });
 
         meta.create_gate("input len check", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
 
-            let mut constraints = vec![];
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
                 let len_i = meta.query_advice(d_lens[i], Rotation::cur());
                 let len_i_1 = meta.query_advice(d_lens[i - 1], Rotation::cur());
-                constraints.push(("len[i] = len[i-1] + !s_i", len_i - len_i_1 - not::expr(s_i)));
+                cb.require_equal("len[i] = len[i-1] + !s_i", len_i, len_i_1 + not::expr(s_i));
             }
 
-            cb.add_constraints(constraints);
             cb.gate(meta.query_selector(q_enable))
         });
 
@@ -342,7 +343,6 @@ mod tests {
             s_flags: [false; KECCAK_RATE_IN_BYTES],
             q_end: 1u64,
         };
-        let s_bits_len = data_len as usize * 8;
 
         let data_len_offset = data_len % KECCAK_RATE_IN_BYTES as u32;
         let data_len_base = (data_len / KECCAK_RATE_IN_BYTES as u32) * KECCAK_RATE_IN_BYTES as u32;
@@ -361,10 +361,10 @@ mod tests {
             output.d_lens[i] = output.d_lens[i - 1] + !output.s_flags[i] as u32;
         }
 
-        for i in s_bits_len..KECCAK_RATE {
+        for i in data_len_offset as usize..KECCAK_RATE {
             output.d_bits[i] = 0u8;
         }
-        output.d_bits[s_bits_len] = 1;
+        output.d_bits[data_len_offset as usize * 8] = 1;
         output.d_bits[KECCAK_RATE - 1] = 1;
 
         println!("{:?}", output.s_flags);
@@ -388,8 +388,20 @@ mod tests {
     }
 
     #[test]
+    fn bit_keccak_len_2() {
+        let input = generate_padding::<Fr>(2);
+        verify::<Fr>(K, vec![input], true);
+    }
+
+    #[test]
     fn bit_keccak_len_135() {
         let input = generate_padding::<Fr>(135);
+        verify::<Fr>(K, vec![input], true);
+    }
+
+    #[test]
+    fn bit_keccak_len_300() {
+        let input = generate_padding::<Fr>(300);
         verify::<Fr>(K, vec![input], true);
     }
 
