@@ -1,23 +1,16 @@
 use crate::{evm_circuit::util::constraint_builder::BaseConstraintBuilder, util::Expr};
 use eth_types::Field;
-use gadgets::util::not;
+use gadgets::util::{not, select};
 use halo2_proofs::{
     circuit::{Layouter, Region, SimpleFloorPlanner},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Selector},
     poly::Rotation,
 };
-use std::{env::var, marker::PhantomData, vec};
+use std::marker::PhantomData;
 
 const KECCAK_WIDTH: usize = 5 * 5 * 64;
 const KECCAK_RATE: usize = 1088;
 const KECCAK_RATE_IN_BYTES: usize = KECCAK_RATE / 8;
-
-fn get_degree() -> usize {
-    var("DEGREE")
-        .unwrap_or_else(|_| "8".to_string())
-        .parse()
-        .expect("Cannot parse DEGREE env var as usize")
-}
 
 /// KeccakPaddingConfig
 #[derive(Clone, Debug)]
@@ -108,9 +101,9 @@ impl<F: Field> KeccakPaddingConfig<F> {
 
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
-                let s_i_1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
+                let s_i_sub1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
 
-                cb.require_boolean("boolean state switch", s_i - s_i_1);
+                cb.require_boolean("boolean state switch", s_i - s_i_sub1);
             }
 
             cb.gate(meta.query_selector(q_enable))
@@ -121,10 +114,11 @@ impl<F: Field> KeccakPaddingConfig<F> {
 
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
-                let s_i_1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
+                let s_i_sub1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
                 let d_bit_0 = meta.query_advice(d_bits[8 * i], Rotation::cur());
-                // constraints.push(("begin with 1", (s_i - s_i_1) * (d_bit_0 - 1u64.expr())));
-                let s_padding_start = s_i - s_i_1;
+                // constraints.push(("begin with 1", (s_i - s_i_sub1) * (d_bit_0 -
+                // 1u64.expr())));
+                let s_padding_start = s_i - s_i_sub1;
                 cb.condition(s_padding_start, |cb| {
                     cb.require_equal("start with 1", d_bit_0, 1u64.expr());
                 });
@@ -160,8 +154,12 @@ impl<F: Field> KeccakPaddingConfig<F> {
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
                 let len_i = meta.query_advice(d_lens[i], Rotation::cur());
-                let len_i_1 = meta.query_advice(d_lens[i - 1], Rotation::cur());
-                cb.require_equal("len[i] = len[i-1] + !s_i", len_i, len_i_1 + not::expr(s_i));
+                let len_i_sub1 = meta.query_advice(d_lens[i - 1], Rotation::cur());
+                cb.require_equal(
+                    "len[i] = len[i-1] + !s_i",
+                    len_i,
+                    len_i_sub1 + not::expr(s_i),
+                );
             }
 
             cb.gate(meta.query_selector(q_enable))
@@ -170,25 +168,26 @@ impl<F: Field> KeccakPaddingConfig<F> {
         meta.create_gate("input rlc check", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
 
-            let mut constraints = vec![];
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
                 let rlc_i = meta.query_advice(d_rlcs[i], Rotation::cur());
-                let rlc_i_1 = meta.query_advice(d_rlcs[i - 1], Rotation::cur());
+                let rlc_i_sub1 = meta.query_advice(d_rlcs[i - 1], Rotation::cur());
                 let r = meta.query_advice(randomness, Rotation::cur());
                 let input_byte_i = d_bits[i * 8..(i + 1) * 8]
                     .iter()
                     .map(|bit| meta.query_advice(*bit, Rotation::cur()))
                     .fold(0u64.expr(), |v, b| v * 2u64.expr() + b);
-                constraints.push((
+                cb.require_equal(
                     "rlc[i] = rlc[i-1]*r if s == 0 else rlc[i]",
-                    rlc_i.clone()
-                        - (rlc_i.clone() * s_i.clone()
-                            + (rlc_i_1 * r + input_byte_i) * not::expr(s_i.clone())),
-                ));
+                    rlc_i,
+                    select::expr(
+                        s_i,
+                        rlc_i_sub1.clone(),
+                        rlc_i_sub1.clone() * r + input_byte_i,
+                    ),
+                )
             }
 
-            cb.add_constraints(constraints);
             cb.gate(meta.query_selector(q_enable))
         });
 
