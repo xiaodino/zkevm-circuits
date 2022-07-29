@@ -121,8 +121,6 @@ impl<F: Field> KeccakMultiRowPaddingConfig<F> {
                 let s_i = s_flag_column_builder.query_advice(meta, i);
                 let s_i_sub1 = s_flag_column_builder.query_advice(meta, i - 1);
                 let d_bit_0 = data_column_builder.query_advice(meta, 8 * i);
-                // constraints.push(("begin with 1", (s_i - s_i_sub1) * (d_bit_0 -
-                // 1u64.expr())));
                 let s_padding_start = s_i - s_i_sub1;
                 cb.condition(s_padding_start, |cb| {
                     cb.require_equal("start with 1", d_bit_0, 1u64.expr());
@@ -260,45 +258,31 @@ impl<F: Field> KeccakMultiRowPaddingConfig<F> {
 
         // Input bits w/ padding
         for (idx, bit) in d_bits.iter().enumerate() {
-            let (col, rot) = self.d_bits_builder.relative_advice_coordinate(idx as u32);
-            region.assign_advice(
-                || format!("assign input data bit {} {}", idx, offset),
-                col,
-                (offset as i32 + rot.0) as usize,
-                || Ok(F::from(*bit as u64)),
-            )?;
+            self.d_bits_builder
+                .assign_advice(region, idx, offset as i32, F::from(*bit as u64))?;
         }
 
         for (idx, s_flag) in s_flags.iter().enumerate() {
-            let (col, rot) = self.s_flags_builder.relative_advice_coordinate(idx as u32);
-
-            region.assign_advice(
-                || format!("assign input data select flag {} {}", idx, offset),
-                col,
-                (offset as i32 + rot.0) as usize,
-                || Ok(F::from(*s_flag as u64)),
+            self.s_flags_builder.assign_advice(
+                region,
+                idx,
+                offset as i32,
+                F::from(*s_flag as u64),
             )?;
         }
 
         for (idx, d_len) in d_lens.iter().enumerate() {
-            let (col, rot) = self.d_lens_builder.relative_advice_coordinate(idx as u32);
-
-            region.assign_advice(
-                || format!("assign input data len {} {}", idx, offset),
-                col,
-                (offset as i32 + rot.0) as usize,
-                || Ok(F::from(*d_len as u64)),
+            self.d_lens_builder.assign_advice(
+                region,
+                idx,
+                offset as i32,
+                F::from(*d_len as u64),
             )?;
         }
 
         for (idx, d_rlc) in d_rlcs.iter().enumerate() {
-            let (col, rot) = self.d_rlcs_builder.relative_advice_coordinate(idx as u32);
-            region.assign_advice(
-                || format!("assign input data rlc {} {}", idx, offset),
-                col,
-                (offset as i32 + rot.0) as usize,
-                || Ok(*d_rlc),
-            )?;
+            self.d_rlcs_builder
+                .assign_advice(region, idx, offset as i32, *d_rlc)?;
         }
 
         region.assign_advice(

@@ -1,6 +1,7 @@
 use eth_types::Field;
 use halo2_proofs::{
-    plonk::{Advice, Column, ConstraintSystem, Expression, VirtualCells},
+    circuit::Region,
+    plonk::{Advice, Column, ConstraintSystem, Error, Expression, VirtualCells},
     poly::Rotation,
 };
 
@@ -24,7 +25,7 @@ impl BaseAdviceColumnBuilderConfig {
     fn query_advice_coordinates(&self, input_idx: u32) -> (Column<Advice>, Rotation) {
         let region_width = self.advices.len() as u32;
         let column_idx = (input_idx % region_width) as usize;
-        let rotation_idx = (input_idx / region_width) as i32 + 1 - self.start_point.1;
+        let rotation_idx = (input_idx / region_width) as i32 - self.start_point.1;
         (self.advices[column_idx], Rotation(rotation_idx))
     }
 }
@@ -73,6 +74,26 @@ impl BaseAdviceColumnBuilder {
         config.query_advice_coordinates(input_idx)
     }
 
+    /// assign the cell value to i-th cell
+    pub fn assign_advice<F: Field>(
+        &self,
+        region: &mut Region<'_, F>,
+        input_idx: usize,
+        offset: i32,
+        value: F,
+    ) -> Result<(), Error> {
+        let (col, rot) = self.relative_advice_coordinate(input_idx as u32);
+
+        region.assign_advice(
+            || format!("assign input data select flag {} {}", input_idx, offset),
+            col,
+            (offset + rot.0) as usize,
+            || Ok(value),
+        )?;
+
+        Ok(())
+    }
+
     /// return size of the managed data
     pub fn size(&self) -> u32 {
         self.config.data_size
@@ -100,6 +121,10 @@ mod tests {
         assert_eq!(col, advice_builder.config.advices[0]);
         assert_eq!(rot, Rotation(0));
 
+        let (col, rot) = advice_builder.config.query_advice_coordinates(98);
+        assert_eq!(col, advice_builder.config.advices[98]);
+        assert_eq!(rot, Rotation(0));
+
         let (col, rot) = advice_builder.config.query_advice_coordinates(101);
         assert_eq!(col, advice_builder.config.advices[1]);
         assert_eq!(rot, Rotation(1));
@@ -115,14 +140,21 @@ mod tests {
         let advice_builder = BaseAdviceColumnBuilder::configure(cs, 500, 100, (0, 3));
         let (col, rot) = advice_builder.config.query_advice_coordinates(0);
         assert_eq!(col, advice_builder.config.advices[0]);
-        assert_eq!(rot, Rotation(-2));
+        assert_eq!(rot, Rotation(-3));
 
         let (col, rot) = advice_builder.config.query_advice_coordinates(101);
         assert_eq!(col, advice_builder.config.advices[1]);
-        assert_eq!(rot, Rotation(-1));
+        assert_eq!(rot, Rotation(-2));
 
         let (col, rot) = advice_builder.config.query_advice_coordinates(305);
         assert_eq!(col, advice_builder.config.advices[5]);
-        assert_eq!(rot, Rotation(1));
+        assert_eq!(rot, Rotation(0));
+    }
+
+    #[test]
+    #[should_panic]
+    fn query_not_works_non_zero_x_offset() {
+        let cs = &mut ConstraintSystem::<Fr>::default();
+        BaseAdviceColumnBuilder::configure(cs, 500, 100, (1, 1));
     }
 }

@@ -116,8 +116,6 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
                 let s_i_sub1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
                 let d_bit_0 = meta.query_advice(d_bits[8 * i], Rotation::cur());
-                // constraints.push(("begin with 1", (s_i - s_i_sub1) * (d_bit_0 -
-                // 1u64.expr())));
                 let s_padding_start = s_i - s_i_sub1;
                 cb.condition(s_padding_start, |cb| {
                     cb.require_equal("start with 1", d_bit_0, 1u64.expr());
