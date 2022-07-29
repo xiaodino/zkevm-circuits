@@ -37,19 +37,19 @@ pub(crate) struct KeccakPaddingRow<F: Field> {
 
 /// KeccakPaddingCircuit
 #[derive(Default)]
-pub struct KeccakPaddingCircuit<F: Field> {
+pub struct KeccakMultiRowPaddingCircuit<F: Field> {
     inputs: Vec<KeccakPaddingRow<F>>,
     size: usize,
     _marker: PhantomData<F>,
 }
 
-impl<F: Field> KeccakPaddingCircuit<F> {
+impl<F: Field> KeccakMultiRowPaddingCircuit<F> {
     fn r() -> F {
         F::from(123456)
     }
 }
 
-impl<F: Field> Circuit<F> for KeccakPaddingCircuit<F> {
+impl<F: Field> Circuit<F> for KeccakMultiRowPaddingCircuit<F> {
     type Config = KeccakMultiRowPaddingConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -70,7 +70,7 @@ impl<F: Field> Circuit<F> for KeccakPaddingCircuit<F> {
             layouter,
             self.size,
             &self.inputs[0],
-            KeccakPaddingCircuit::r(),
+            KeccakMultiRowPaddingCircuit::r(),
         )?;
         Ok(())
     }
@@ -311,7 +311,7 @@ mod tests {
     use halo2_proofs::{dev::MockProver, pairing::bn256::Fr};
 
     fn verify<F: Field>(k: u32, inputs: Vec<KeccakPaddingRow<F>>, success: bool) {
-        let circuit = KeccakPaddingCircuit::<F> {
+        let circuit = KeccakMultiRowPaddingCircuit::<F> {
             inputs,
             size: 2usize.pow(k),
             _marker: PhantomData,
