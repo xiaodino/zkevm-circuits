@@ -1,3 +1,4 @@
+use crate::keccak_circuit::keccak_utils::*;
 use crate::{evm_circuit::util::constraint_builder::BaseConstraintBuilder, util::Expr};
 use eth_types::Field;
 use gadgets::util::{not, select};
@@ -14,13 +15,13 @@ const KECCAK_RATE_IN_BYTES: usize = KECCAK_RATE / 8;
 
 /// KeccakPaddingConfig
 #[derive(Clone, Debug)]
-pub struct KeccakPaddingConfig<F> {
+pub struct KeccakMultiRowPaddingConfig<F> {
     q_enable: Selector,
     q_end: Column<Advice>,
-    d_bits: [Column<Advice>; KECCAK_WIDTH],
-    d_lens: [Column<Advice>; KECCAK_RATE_IN_BYTES],
-    d_rlcs: [Column<Advice>; KECCAK_RATE_IN_BYTES],
-    s_flags: [Column<Advice>; KECCAK_RATE_IN_BYTES],
+    d_bits_builder: BaseAdviceColumnBuilder,
+    d_lens_builder: BaseAdviceColumnBuilder,
+    d_rlcs_builder: BaseAdviceColumnBuilder,
+    s_flags_builder: BaseAdviceColumnBuilder,
     randomness: Column<Advice>,
 
     _marker: PhantomData<F>,
@@ -49,7 +50,7 @@ impl<F: Field> KeccakPaddingCircuit<F> {
 }
 
 impl<F: Field> Circuit<F> for KeccakPaddingCircuit<F> {
-    type Config = KeccakPaddingConfig<F>;
+    type Config = KeccakMultiRowPaddingConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -57,7 +58,7 @@ impl<F: Field> Circuit<F> for KeccakPaddingCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        KeccakPaddingConfig::configure(meta)
+        KeccakMultiRowPaddingConfig::configure(meta)
     }
 
     fn synthesize(
@@ -75,33 +76,37 @@ impl<F: Field> Circuit<F> for KeccakPaddingCircuit<F> {
     }
 }
 
-impl<F: Field> KeccakPaddingConfig<F> {
+impl<F: Field> KeccakMultiRowPaddingConfig<F> {
     pub(crate) fn configure(meta: &mut ConstraintSystem<F>) -> Self {
         let q_enable = meta.selector();
         let q_end = meta.advice_column();
-        let d_bits = [(); KECCAK_WIDTH].map(|_| meta.advice_column());
-        let d_lens = [(); KECCAK_RATE_IN_BYTES].map(|_| meta.advice_column());
-        let d_rlcs = [(); KECCAK_RATE_IN_BYTES].map(|_| meta.advice_column());
-        let s_flags = [(); KECCAK_RATE_IN_BYTES].map(|_| meta.advice_column());
+        let data_column_builder =
+            BaseAdviceColumnBuilder::configure(meta, KECCAK_RATE as u32, 64, (0, 0));
+        let len_column_builder =
+            BaseAdviceColumnBuilder::configure(meta, KECCAK_RATE_IN_BYTES as u32, 8, (0, 0));
+        let rls_column_builder =
+            BaseAdviceColumnBuilder::configure(meta, KECCAK_RATE_IN_BYTES as u32, 8, (0, 0));
+        let s_flag_column_builder =
+            BaseAdviceColumnBuilder::configure(meta, KECCAK_RATE_IN_BYTES as u32, 8, (0, 0));
         let randomness = meta.advice_column();
 
         meta.create_gate("boolean checks", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
 
             //TODO: could be removed if combined with keccak circuit?
-            for data_bit in d_bits {
-                let b = meta.query_advice(data_bit, Rotation::cur());
+            for i in 0..data_column_builder.size() {
+                let b = data_column_builder.query_advice(meta, i);
                 cb.require_boolean("input data bit", b);
             }
 
-            for s_flag in s_flags {
-                let s = meta.query_advice(s_flag, Rotation::cur());
+            for i in 0..s_flag_column_builder.size() {
+                let s = s_flag_column_builder.query_advice(meta, i);
                 cb.require_boolean("boolean state bit", s);
             }
 
-            for i in 1..s_flags.len() {
-                let s_i = meta.query_advice(s_flags[i], Rotation::cur());
-                let s_i_sub1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
+            for i in 1..s_flag_column_builder.size() {
+                let s_i = s_flag_column_builder.query_advice(meta, i);
+                let s_i_sub1 = s_flag_column_builder.query_advice(meta, i - 1);
 
                 cb.require_boolean("boolean state switch", s_i - s_i_sub1);
             }
@@ -112,10 +117,10 @@ impl<F: Field> KeccakPaddingConfig<F> {
         meta.create_gate("padding bit checks", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
 
-            for i in 1..s_flags.len() {
-                let s_i = meta.query_advice(s_flags[i], Rotation::cur());
-                let s_i_sub1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
-                let d_bit_0 = meta.query_advice(d_bits[8 * i], Rotation::cur());
+            for i in 1..s_flag_column_builder.size() {
+                let s_i = s_flag_column_builder.query_advice(meta, i);
+                let s_i_sub1 = s_flag_column_builder.query_advice(meta, i - 1);
+                let d_bit_0 = data_column_builder.query_advice(meta, 8 * i);
                 // constraints.push(("begin with 1", (s_i - s_i_sub1) * (d_bit_0 -
                 // 1u64.expr())));
                 let s_padding_start = s_i - s_i_sub1;
@@ -123,8 +128,9 @@ impl<F: Field> KeccakPaddingConfig<F> {
                     cb.require_equal("start with 1", d_bit_0, 1u64.expr());
                 });
             }
-            let s_last = meta.query_advice(s_flags[s_flags.len() - 1], Rotation::cur());
-            let d_last = meta.query_advice(d_bits[KECCAK_RATE - 1], Rotation::cur());
+
+            let s_last = s_flag_column_builder.query_advice(meta, s_flag_column_builder.size() - 1);
+            let d_last = data_column_builder.query_advice(meta, KECCAK_RATE as u32 - 1);
 
             cb.condition(s_last, |cb| {
                 cb.require_equal("end with 1", d_last, 1u64.expr())
@@ -136,11 +142,11 @@ impl<F: Field> KeccakPaddingConfig<F> {
             let mut cb = BaseConstraintBuilder::new(5);
 
             let mut sum_padding_bits = 0u64.expr();
-            for i in 0..s_flags.len() {
-                let s_i = meta.query_advice(s_flags[i], Rotation::cur());
-                sum_padding_bits = d_bits[i * 8..(i + 1) * 8]
-                    .iter()
-                    .map(|b| meta.query_advice(*b, Rotation::cur()))
+            for i in 0..s_flag_column_builder.size() {
+                let s_i = s_flag_column_builder.query_advice(meta, i);
+
+                sum_padding_bits = (i * 8..(i + 1) * 8)
+                    .map(|k| data_column_builder.query_advice(meta, k))
                     .fold(sum_padding_bits, |sum, b| sum + s_i.clone() * b);
             }
 
@@ -151,10 +157,11 @@ impl<F: Field> KeccakPaddingConfig<F> {
         meta.create_gate("input len check", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
 
-            for i in 1..s_flags.len() {
-                let s_i = meta.query_advice(s_flags[i], Rotation::cur());
-                let len_i = meta.query_advice(d_lens[i], Rotation::cur());
-                let len_i_sub1 = meta.query_advice(d_lens[i - 1], Rotation::cur());
+            for i in 1..s_flag_column_builder.size() {
+                let s_i = s_flag_column_builder.query_advice(meta, i);
+                let len_i = len_column_builder.query_advice(meta, i);
+                let len_i_sub1 = len_column_builder.query_advice(meta, i - 1);
+
                 cb.require_equal(
                     "len[i] = len[i-1] + !s_i",
                     len_i,
@@ -168,14 +175,14 @@ impl<F: Field> KeccakPaddingConfig<F> {
         meta.create_gate("input rlc check", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
 
-            for i in 1..s_flags.len() {
-                let s_i = meta.query_advice(s_flags[i], Rotation::cur());
-                let rlc_i = meta.query_advice(d_rlcs[i], Rotation::cur());
-                let rlc_i_sub1 = meta.query_advice(d_rlcs[i - 1], Rotation::cur());
+            for i in 1..s_flag_column_builder.size() {
+                let s_i = s_flag_column_builder.query_advice(meta, i);
+                let rlc_i = rls_column_builder.query_advice(meta, i);
+                let rlc_i_sub1 = rls_column_builder.query_advice(meta, i - 1);
+
                 let r = meta.query_advice(randomness, Rotation::cur());
-                let input_byte_i = d_bits[i * 8..(i + 1) * 8]
-                    .iter()
-                    .map(|bit| meta.query_advice(*bit, Rotation::cur()))
+                let input_byte_i = (i * 8..(i + 1) * 8)
+                    .map(|k| data_column_builder.query_advice(meta, k))
                     .fold(0u64.expr(), |v, b| v * 2u64.expr() + b);
                 cb.require_equal(
                     "rlc[i] = rlc[i-1]*r if s == 0 else rlc[i]",
@@ -194,20 +201,20 @@ impl<F: Field> KeccakPaddingConfig<F> {
         meta.create_gate("input ending check", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
 
-            let s_last = meta.query_advice(s_flags[s_flags.len() - 1], Rotation::cur());
+            let s_last = s_flag_column_builder.query_advice(meta, s_flag_column_builder.size() - 1);
             let q_end = meta.query_advice(q_end, Rotation::cur());
 
             cb.require_equal("s_last == q_end", s_last, q_end);
             cb.gate(meta.query_selector(q_enable))
         });
 
-        KeccakPaddingConfig {
+        KeccakMultiRowPaddingConfig {
             q_enable,
             q_end,
-            d_bits,
-            d_lens,
-            d_rlcs,
-            s_flags,
+            d_bits_builder: data_column_builder,
+            d_lens_builder: len_column_builder,
+            d_rlcs_builder: rls_column_builder,
+            s_flags_builder: s_flag_column_builder,
             randomness,
             _marker: PhantomData,
         }
@@ -252,38 +259,44 @@ impl<F: Field> KeccakPaddingConfig<F> {
         self.q_enable.enable(region, offset)?;
 
         // Input bits w/ padding
-        for (idx, (bit, column)) in d_bits.iter().zip(self.d_bits.iter()).enumerate() {
+        for (idx, bit) in d_bits.iter().enumerate() {
+            let (col, rot) = self.d_bits_builder.relative_advice_coordinate(idx as u32);
             region.assign_advice(
                 || format!("assign input data bit {} {}", idx, offset),
-                *column,
-                offset,
+                col,
+                (offset as i32 + rot.0) as usize,
                 || Ok(F::from(*bit as u64)),
             )?;
         }
 
-        for (idx, (s_flag, column)) in s_flags.iter().zip(self.s_flags.iter()).enumerate() {
+        for (idx, s_flag) in s_flags.iter().enumerate() {
+            let (col, rot) = self.s_flags_builder.relative_advice_coordinate(idx as u32);
+
             region.assign_advice(
                 || format!("assign input data select flag {} {}", idx, offset),
-                *column,
-                offset,
+                col,
+                (offset as i32 + rot.0) as usize,
                 || Ok(F::from(*s_flag as u64)),
             )?;
         }
 
-        for (idx, (d_len, column)) in d_lens.iter().zip(self.d_lens.iter()).enumerate() {
+        for (idx, d_len) in d_lens.iter().enumerate() {
+            let (col, rot) = self.d_lens_builder.relative_advice_coordinate(idx as u32);
+
             region.assign_advice(
                 || format!("assign input data len {} {}", idx, offset),
-                *column,
-                offset,
+                col,
+                (offset as i32 + rot.0) as usize,
                 || Ok(F::from(*d_len as u64)),
             )?;
         }
 
-        for (idx, (d_rlc, column)) in d_rlcs.iter().zip(self.d_rlcs.iter()).enumerate() {
+        for (idx, d_rlc) in d_rlcs.iter().enumerate() {
+            let (col, rot) = self.d_rlcs_builder.relative_advice_coordinate(idx as u32);
             region.assign_advice(
                 || format!("assign input data rlc {} {}", idx, offset),
-                *column,
-                offset,
+                col,
+                (offset as i32 + rot.0) as usize,
                 || Ok(*d_rlc),
             )?;
         }
