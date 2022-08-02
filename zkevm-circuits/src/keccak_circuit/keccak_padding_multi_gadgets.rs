@@ -338,7 +338,7 @@ impl<F: Field> KeccakSubRowConfig<F> {
         }
     }
 
-    /// Returns (last_len, last_rlc, last_s, randomness)
+    /// Returns (last_len, last_rlc, last_s, padding_sum, randomness)
     fn process(
         &self,
         mut layouter: &mut impl Layouter<F>,
@@ -346,10 +346,12 @@ impl<F: Field> KeccakSubRowConfig<F> {
         prev_rlc: &AssignedCell<F, F>,
         prev_s_flag: &AssignedCell<F, F>,
         prev_padding_sum: &AssignedCell<F, F>,
+        randomness_cell: &AssignedCell<F, F>,
         curr_sub_row: &KeccakPaddingSubRow<F>,
         row_idx: u32,
     ) -> Result<
         (
+            AssignedCell<F, F>,
             AssignedCell<F, F>,
             AssignedCell<F, F>,
             AssignedCell<F, F>,
@@ -369,6 +371,7 @@ impl<F: Field> KeccakSubRowConfig<F> {
                     prev_rlc,
                     prev_s_flag,
                     prev_padding_sum,
+                    randomness_cell,
                     curr_sub_row,
                 )
             },
@@ -384,9 +387,11 @@ impl<F: Field> KeccakSubRowConfig<F> {
         prev_rlc: &AssignedCell<F, F>,
         prev_s_flag: &AssignedCell<F, F>,
         prev_padding_sum: &AssignedCell<F, F>,
+        randomness_cell: &AssignedCell<F, F>,
         curr_sub_row: &KeccakPaddingSubRow<F>,
     ) -> Result<
         (
+            AssignedCell<F, F>,
             AssignedCell<F, F>,
             AssignedCell<F, F>,
             AssignedCell<F, F>,
@@ -398,7 +403,6 @@ impl<F: Field> KeccakSubRowConfig<F> {
         let d_lens = curr_sub_row.d_lens;
         let d_rlcs = curr_sub_row.d_rlcs;
         let s_flags = curr_sub_row.s_flags;
-        let randomness = curr_sub_row.randomness;
 
         self.q_enable.enable(region, offset)?;
 
@@ -410,6 +414,12 @@ impl<F: Field> KeccakSubRowConfig<F> {
             || "prev padding sum",
             region,
             self.prev_padding_sum,
+            offset,
+        )?;
+        let randomness = randomness_cell.copy_advice(
+            || "use same randomness",
+            region,
+            self.randomness,
             offset,
         )?;
 
@@ -457,13 +467,6 @@ impl<F: Field> KeccakSubRowConfig<F> {
             || Ok(F::from(q_end)),
         )?;
 
-        region.assign_advice(
-            || format!("assign randomness{}", offset),
-            self.randomness,
-            offset,
-            || Ok(randomness),
-        )?;
-
         // output the curr len,rlc,s_flag & padding
         let curr_len = region.assign_advice(
             || format!("assign curr_len{}", offset),
@@ -493,7 +496,13 @@ impl<F: Field> KeccakSubRowConfig<F> {
             || Ok(F::from(curr_sub_row.curr_padding_sum as u64)),
         )?;
 
-        Ok((curr_len, curr_rlc, curr_s_flag, curr_padding_sum))
+        Ok((
+            curr_len,
+            curr_rlc,
+            curr_s_flag,
+            curr_padding_sum,
+            randomness,
+        ))
     }
 }
 
@@ -591,7 +600,21 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
                     offset,
                     || Ok(F::zero()),
                 )?;
-                Ok((prev_len, prev_rlc, prev_s_flag, prev_padding_sum))
+
+                let randomness = region.assign_advice(
+                    || format!("assign randomness{}", offset),
+                    self.first_row_config.randomness,
+                    offset,
+                    || Ok(keccak_padding_row[0].randomness),
+                )?;
+
+                Ok((
+                    prev_len,
+                    prev_rlc,
+                    prev_s_flag,
+                    prev_padding_sum,
+                    randomness,
+                ))
             },
         )?;
 
@@ -599,6 +622,7 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
         let mut prev_rlc = prev_values.1;
         let mut prev_s_flag = prev_values.2;
         let mut prev_padding_sum = prev_values.3;
+        let mut randomness = prev_values.4;
 
         prev_values = self.first_row_config.process(
             layouter,
@@ -606,6 +630,7 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
             &prev_rlc,
             &prev_s_flag,
             &prev_padding_sum,
+            &randomness,
             &keccak_padding_row[0],
             0,
         )?;
@@ -614,6 +639,7 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
         prev_rlc = prev_values.1;
         prev_s_flag = prev_values.2;
         prev_padding_sum = prev_values.3;
+        randomness = prev_values.4;
 
         for i in 1..16 {
             prev_values = self.middle_row_config.process(
@@ -622,6 +648,7 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
                 &prev_rlc,
                 &prev_s_flag,
                 &prev_padding_sum,
+                &randomness,
                 &keccak_padding_row[i],
                 i as u32,
             )?;
@@ -630,6 +657,7 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
             prev_rlc = prev_values.1;
             prev_s_flag = prev_values.2;
             prev_padding_sum = prev_values.3;
+            randomness = prev_values.4;
         }
 
         self.last_row_config.process(
@@ -638,6 +666,7 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
             &prev_rlc,
             &prev_s_flag,
             &prev_padding_sum,
+            &randomness,
             &keccak_padding_row[16],
             16 as u32,
         )?;
