@@ -18,31 +18,32 @@ const KECCAK_REGION_HEIGHT: usize = KECCAK_RATE / KECCAK_DATA_REGION_WIDTH;
 
 #[rustfmt::skip]
 /// KeccakMultiGadgetPaddingConfig
-/// Circuit Layout is like this, each row is a KeccakSubRowConfig with 64 bits data.
-///        +-----------+-----------------+--------------+---------------+-------------+----------------+------------+
-/// 1st      prev_xxxx    d_bits[0..64]    d_lens[0..8]   s_flags[0..8]   d_rlcs[0..8]  curr_last_xxxx   randomness  
-///        +-----------+-----------------+--------------+---------------+-------------+----------------+------------+
-///                                                                                             |            |
-///            +--------------------------------------------------------------------------------+            |
-///            |                                                                                             |
-///        +-----------+-----------------+--------------+---------------+-------------+----------------+------------+
-/// 2nd      prev_xxxx    d_bits[0..64]    d_lens[0..8]   s_flags[0..8]   d_rlcs[0..8]  curr_last_xxxx   randomness   
-///  .     +-----------+-----------------+--------------+---------------+-------------+----------------+------------+
-///  .                                                                                          |            |
-/// (middle)   +--------------------------------------------------------------------------------+            |
-///  .         |                                                                                             |
-///  .     +-----------+-----------------+--------------+---------------+-------------+----------------+------------+
-/// 15th     prev_xxxx    d_bits[0..64]    d_lens[0..8]   s_flags[0..8]   d_rlcs[0..8]  curr_last_xxxx   randomness  
-///  .     +-----------+-----------------+--------------+---------------+-------------+----------------+------------+
-///                                                                                             |            |
-///            +--------------------------------------------------------------------------------+            |
-///            |                                                                                             |
-///        +-----------+-----------------+--------------+---------------+-------------+----------------+------------+
-/// last     prev_xxxx    d_bits[0..64]    d_lens[0..8]   s_flags[0..8]   d_rlcs[0..8]  curr_last_xxxx   randomness  
-/// (16th) +-----------+-----------------+--------------+---------------+-------------+----------------+------------+
+/// The data field of circuit Layout is like this (without selectors),
+/// each row is a KeccakSubRowConfig with 64 bits data.
+/// 
+///        +-----------+--------------+-----------+------------+----------+-----------+------------+
+/// 1st      prev_xxxx    d_bits[64]    d_lens[8]   s_flags[8]   d_rlcs[8]  curr_xxxx   randomness  
+///        +-----------+--------------+-----------+------------+----------+-----------+------------+
+///                                                                             |           |       
+///            +---------------------------copy---------------------------------+          copy     
+///            |                                                                            |       
+///        +-----------+--------------+-----------+------------+----------+-----------+------------+
+/// 2nd      prev_xxxx    d_bits[64]    d_lens[8]   s_flags[8]   d_rlcs[8]  curr_xxxx   randomness   
+///  .     +-----------+--------------+-----------+------------+----------+-----------+------------+
+///  .                                                                          |           |       
+///  .         +---------------------------copy---------------------------------+          copy     
+///  .         |                                                                            |       
+///  .     +-----------+--------------+-----------+------------+----------+-----------+------------+
+/// 15th     prev_xxxx    d_bits[64]    d_lens[8]   s_flags[8]   d_rlcs[8]  curr_xxxx   randomness  
+///  .     +-----------+--------------+-----------+------------+----------+-----------+------------+
+///                                                                             |           |       
+///            +---------------------------copy---------------------------------+          copy     
+///            |                                                                            |       
+///        +-----------+--------------+-----------+------------+----------+-----------+------------+
+/// last     prev_xxxx    d_bits[64]    d_lens[8]   s_flags[8]   d_rlcs[8]  curr_xxxx   randomness  
+/// (16th) +-----------+--------------+-----------+------------+----------+-----------+------------+
 #[derive(Clone, Debug)]
 pub struct KeccakMultiGadgetPaddingConfig<F> {
-    q_enable: Selector,
     first_row_config: KeccakSubRowConfig<F>,
     middle_row_config: KeccakSubRowConfig<F>,
     last_row_config: KeccakSubRowConfig<F>,
@@ -67,10 +68,9 @@ pub(crate) struct KeccakPaddingSubRow<F: Field> {
     pub(crate) s_flags: [bool; KECCAK_DATA_REGION_WIDTH / 8],
 }
 
-///KeccakSubRowConfig
+///KeccakSubRowCommonConfig for shared columns except the selector
 #[derive(Clone, Debug)]
-pub struct KeccakSubRowConfig<F> {
-    q_enable: Selector,
+pub struct KeccakSubRowSharedConfig<F> {
     randomness: Column<Advice>,
     q_end: Column<Advice>,
     prev_len: Column<Advice>,
@@ -89,36 +89,37 @@ pub struct KeccakSubRowConfig<F> {
     _marker: PhantomData<F>,
 }
 
+///KeccakSubRowConfig
+#[derive(Clone, Debug)]
+pub struct KeccakSubRowConfig<F> {
+    q_enable: Selector,
+    config: KeccakSubRowSharedConfig<F>,
+
+    _marker: PhantomData<F>,
+}
+
 impl<F: Field> KeccakSubRowConfig<F> {
     fn configure(
         meta: &mut ConstraintSystem<F>,
-        q_enable: Selector,
-        randomness: Column<Advice>,
+        shared_config: &KeccakSubRowSharedConfig<F>,
         is_first_row: bool,
         is_last_row: bool,
     ) -> KeccakSubRowConfig<F> {
-        let q_end = meta.advice_column();
-        let prev_len = meta.advice_column();
-        let prev_rlc = meta.advice_column();
-        let prev_s_flag = meta.advice_column();
-        let prev_padding_sum = meta.advice_column();
-        let curr_len = meta.advice_column();
-        let curr_rlc = meta.advice_column();
-        let curr_s_flag = meta.advice_column();
-        let curr_padding_sum = meta.advice_column();
-        let d_bits = [(); KECCAK_DATA_REGION_WIDTH].map(|_| meta.advice_column());
-        let d_lens = [(); KECCAK_DATA_REGION_WIDTH / 8].map(|_| meta.advice_column());
-        let d_rlcs = [(); KECCAK_DATA_REGION_WIDTH / 8].map(|_| meta.advice_column());
-        let s_flags = [(); KECCAK_DATA_REGION_WIDTH / 8].map(|_| meta.advice_column());
-
-        meta.enable_equality(prev_len);
-        meta.enable_equality(prev_rlc);
-        meta.enable_equality(prev_s_flag);
-        meta.enable_equality(prev_padding_sum);
-        meta.enable_equality(curr_len);
-        meta.enable_equality(curr_rlc);
-        meta.enable_equality(curr_s_flag);
-        meta.enable_equality(curr_padding_sum);
+        let q_enable = meta.selector();
+        let q_end = shared_config.q_end;
+        let prev_len = shared_config.prev_len;
+        let prev_rlc = shared_config.prev_rlc;
+        let prev_s_flag = shared_config.prev_s_flag;
+        let prev_padding_sum = shared_config.prev_padding_sum;
+        let curr_len = shared_config.curr_len;
+        let curr_rlc = shared_config.curr_rlc;
+        let curr_s_flag = shared_config.curr_s_flag;
+        let curr_padding_sum = shared_config.curr_padding_sum;
+        let d_bits = shared_config.d_bits;
+        let d_lens = shared_config.d_lens;
+        let d_rlcs = shared_config.d_rlcs;
+        let s_flags = shared_config.s_flags;
+        let randomness = shared_config.randomness;
 
         if is_first_row {
             meta.create_gate("prev should be 0 for the 1st row", |meta| {
@@ -319,20 +320,23 @@ impl<F: Field> KeccakSubRowConfig<F> {
 
         KeccakSubRowConfig {
             q_enable,
-            randomness,
-            q_end,
-            prev_len,
-            prev_rlc,
-            prev_s_flag,
-            prev_padding_sum,
-            curr_len,
-            curr_rlc,
-            curr_s_flag,
-            curr_padding_sum,
-            d_bits,
-            d_lens,
-            d_rlcs,
-            s_flags,
+            config: KeccakSubRowSharedConfig {
+                randomness,
+                q_end,
+                prev_len,
+                prev_rlc,
+                prev_s_flag,
+                prev_padding_sum,
+                curr_len,
+                curr_rlc,
+                curr_s_flag,
+                curr_padding_sum,
+                d_bits,
+                d_lens,
+                d_rlcs,
+                s_flags,
+                _marker: PhantomData,
+            },
 
             _marker: PhantomData,
         }
@@ -407,24 +411,24 @@ impl<F: Field> KeccakSubRowConfig<F> {
         self.q_enable.enable(region, offset)?;
 
         // copy prev values
-        prev_len.copy_advice(|| "prev len", region, self.prev_len, offset)?;
-        prev_rlc.copy_advice(|| "prev rlc", region, self.prev_rlc, offset)?;
-        prev_s_flag.copy_advice(|| "prev s_flag", region, self.prev_s_flag, offset)?;
+        prev_len.copy_advice(|| "prev len", region, self.config.prev_len, offset)?;
+        prev_rlc.copy_advice(|| "prev rlc", region, self.config.prev_rlc, offset)?;
+        prev_s_flag.copy_advice(|| "prev s_flag", region, self.config.prev_s_flag, offset)?;
         prev_padding_sum.copy_advice(
             || "prev padding sum",
             region,
-            self.prev_padding_sum,
+            self.config.prev_padding_sum,
             offset,
         )?;
         let randomness = randomness_cell.copy_advice(
             || "use same randomness",
             region,
-            self.randomness,
+            self.config.randomness,
             offset,
         )?;
 
         // Input bits w/ padding
-        for (idx, (bit, column)) in d_bits.iter().zip(self.d_bits.iter()).enumerate() {
+        for (idx, (bit, column)) in d_bits.iter().zip(self.config.d_bits.iter()).enumerate() {
             region.assign_advice(
                 || format!("assign input data bit {} {}", idx, offset),
                 *column,
@@ -433,7 +437,7 @@ impl<F: Field> KeccakSubRowConfig<F> {
             )?;
         }
 
-        for (idx, (s_flag, column)) in s_flags.iter().zip(self.s_flags.iter()).enumerate() {
+        for (idx, (s_flag, column)) in s_flags.iter().zip(self.config.s_flags.iter()).enumerate() {
             region.assign_advice(
                 || format!("assign input data select flag {} {}", idx, offset),
                 *column,
@@ -442,7 +446,7 @@ impl<F: Field> KeccakSubRowConfig<F> {
             )?;
         }
 
-        for (idx, (d_len, column)) in d_lens.iter().zip(self.d_lens.iter()).enumerate() {
+        for (idx, (d_len, column)) in d_lens.iter().zip(self.config.d_lens.iter()).enumerate() {
             region.assign_advice(
                 || format!("assign input data len {} {}", idx, offset),
                 *column,
@@ -451,7 +455,7 @@ impl<F: Field> KeccakSubRowConfig<F> {
             )?;
         }
 
-        for (idx, (d_rlc, column)) in d_rlcs.iter().zip(self.d_rlcs.iter()).enumerate() {
+        for (idx, (d_rlc, column)) in d_rlcs.iter().zip(self.config.d_rlcs.iter()).enumerate() {
             region.assign_advice(
                 || format!("assign input data rlc {} {}", idx, offset),
                 *column,
@@ -462,7 +466,7 @@ impl<F: Field> KeccakSubRowConfig<F> {
 
         region.assign_advice(
             || format!("assign q_end{}", offset),
-            self.q_end,
+            self.config.q_end,
             offset,
             || Ok(F::from(q_end)),
         )?;
@@ -470,28 +474,28 @@ impl<F: Field> KeccakSubRowConfig<F> {
         // output the curr len,rlc,s_flag & padding
         let curr_len = region.assign_advice(
             || format!("assign curr_len{}", offset),
-            self.curr_len,
+            self.config.curr_len,
             offset,
             || Ok(F::from(curr_sub_row.curr_len as u64)),
         )?;
 
         let curr_rlc = region.assign_advice(
             || format!("assign curr_rlc{}", offset),
-            self.curr_rlc,
+            self.config.curr_rlc,
             offset,
             || Ok(curr_sub_row.curr_rlc),
         )?;
 
         let curr_s_flag = region.assign_advice(
             || format!("assign curr_s_flag{}", offset),
-            self.curr_s_flag,
+            self.config.curr_s_flag,
             offset,
             || Ok(F::from(curr_sub_row.curr_s_flag)),
         )?;
 
         let curr_padding_sum = region.assign_advice(
             || format!("assign curr_padding_sum{}", offset),
-            self.curr_padding_sum,
+            self.config.curr_padding_sum,
             offset,
             || Ok(F::from(curr_sub_row.curr_padding_sum as u64)),
         )?;
@@ -544,17 +548,54 @@ impl<F: Field> Circuit<F> for KeccakMultiGadgetPaddingCircuit<F> {
 
 impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
     pub(crate) fn configure(meta: &mut ConstraintSystem<F>) -> Self {
-        let q_enable = meta.selector();
+        let q_end = meta.advice_column();
+        let prev_len = meta.advice_column();
+        let prev_rlc = meta.advice_column();
+        let prev_s_flag = meta.advice_column();
+        let prev_padding_sum = meta.advice_column();
+        let curr_len = meta.advice_column();
+        let curr_rlc = meta.advice_column();
+        let curr_s_flag = meta.advice_column();
+        let curr_padding_sum = meta.advice_column();
+        let d_bits = [(); KECCAK_DATA_REGION_WIDTH].map(|_| meta.advice_column());
+        let d_lens = [(); KECCAK_DATA_REGION_WIDTH / 8].map(|_| meta.advice_column());
+        let d_rlcs = [(); KECCAK_DATA_REGION_WIDTH / 8].map(|_| meta.advice_column());
+        let s_flags = [(); KECCAK_DATA_REGION_WIDTH / 8].map(|_| meta.advice_column());
         let randomness = meta.advice_column();
-        let first_row_config =
-            KeccakSubRowConfig::configure(meta, q_enable, randomness, true, false);
-        let middle_row_config =
-            KeccakSubRowConfig::configure(meta, q_enable, randomness, false, false);
-        let last_row_config =
-            KeccakSubRowConfig::configure(meta, q_enable, randomness, false, true);
+
+        meta.enable_equality(prev_len);
+        meta.enable_equality(prev_rlc);
+        meta.enable_equality(prev_s_flag);
+        meta.enable_equality(prev_padding_sum);
+        meta.enable_equality(curr_len);
+        meta.enable_equality(curr_rlc);
+        meta.enable_equality(curr_s_flag);
+        meta.enable_equality(curr_padding_sum);
+        meta.enable_equality(randomness);
+
+        let shared_config = &KeccakSubRowSharedConfig::<F> {
+            q_end: q_end,
+            prev_len: prev_len,
+            prev_rlc: prev_rlc,
+            prev_s_flag: prev_s_flag,
+            prev_padding_sum: prev_padding_sum,
+            curr_len: curr_len,
+            curr_rlc: curr_rlc,
+            curr_s_flag: curr_s_flag,
+            curr_padding_sum: curr_padding_sum,
+            d_bits: d_bits,
+            d_lens: d_lens,
+            d_rlcs: d_rlcs,
+            s_flags: s_flags,
+            randomness: randomness,
+            _marker: PhantomData,
+        };
+
+        let first_row_config = KeccakSubRowConfig::configure(meta, shared_config, true, false);
+        let middle_row_config = KeccakSubRowConfig::configure(meta, shared_config, false, false);
+        let last_row_config = KeccakSubRowConfig::configure(meta, shared_config, false, true);
 
         KeccakMultiGadgetPaddingConfig {
-            q_enable,
             first_row_config,
             middle_row_config,
             last_row_config,
@@ -577,32 +618,32 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
                 let offset = 0;
                 let prev_len = region.assign_advice(
                     || format!("assign prev_len{}", offset),
-                    self.first_row_config.prev_len,
+                    self.first_row_config.config.prev_len,
                     offset,
                     || Ok(F::from(keccak_padding_row[0].prev_len as u64)),
                 )?;
                 let prev_rlc = region.assign_advice(
                     || format!("assign prev_rlc{}", offset),
-                    self.first_row_config.prev_rlc,
+                    self.first_row_config.config.prev_rlc,
                     offset,
                     || Ok(keccak_padding_row[0].prev_rlc),
                 )?;
                 let prev_s_flag = region.assign_advice(
                     || format!("assign prev_s_flag{}", offset),
-                    self.first_row_config.prev_s_flag,
+                    self.first_row_config.config.prev_s_flag,
                     offset,
                     || Ok(F::zero()),
                 )?;
                 let prev_padding_sum = region.assign_advice(
                     || format!("assign prev_padding_sum{}", offset),
-                    self.first_row_config.prev_padding_sum,
+                    self.first_row_config.config.prev_padding_sum,
                     offset,
                     || Ok(F::zero()),
                 )?;
 
                 let randomness = region.assign_advice(
                     || format!("assign randomness{}", offset),
-                    self.first_row_config.randomness,
+                    self.first_row_config.config.randomness,
                     offset,
                     || Ok(keccak_padding_row[0].randomness),
                 )?;
