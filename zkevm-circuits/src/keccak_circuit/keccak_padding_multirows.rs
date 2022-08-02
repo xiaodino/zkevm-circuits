@@ -61,11 +61,7 @@ impl<F: Field> Circuit<F> for KeccakMultiRowPaddingCircuit<F> {
         KeccakMultiRowPaddingConfig::configure(meta)
     }
 
-    fn synthesize(
-        &self,
-        config: Self::Config,
-        mut layouter: impl Layouter<F>,
-    ) -> Result<(), Error> {
+    fn synthesize(&self, config: Self::Config, layouter: impl Layouter<F>) -> Result<(), Error> {
         config.assign(
             layouter,
             self.size,

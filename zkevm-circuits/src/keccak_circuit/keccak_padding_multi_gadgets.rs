@@ -341,7 +341,7 @@ impl<F: Field> KeccakSubRowConfig<F> {
     /// Returns (last_len, last_rlc, last_s, padding_sum, randomness)
     fn process(
         &self,
-        mut layouter: &mut impl Layouter<F>,
+        layouter: &mut impl Layouter<F>,
         prev_len: &AssignedCell<F, F>,
         prev_rlc: &AssignedCell<F, F>,
         prev_s_flag: &AssignedCell<F, F>,
@@ -565,17 +565,16 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
 
     pub(crate) fn synthesize(
         &self,
-        mut layouter: &mut impl Layouter<F>,
+        layouter: &mut impl Layouter<F>,
         _size: usize,
         keccak_padding_row: &Vec<KeccakPaddingSubRow<F>>,
     ) -> Result<(), Error> {
         assert_eq!(keccak_padding_row.len(), 17);
 
-        let mut prev_values = layouter.assign_region(
+        let prev_values = layouter.assign_region(
             || "assign prev value of the first row",
             |mut region| {
                 let offset = 0;
-                //TODO: rlc and len should be a input from previous circuit
                 let prev_len = region.assign_advice(
                     || format!("assign prev_len{}", offset),
                     self.first_row_config.prev_len,
@@ -624,7 +623,7 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
         let mut prev_padding_sum = prev_values.3;
         let mut randomness = prev_values.4;
 
-        prev_values = self.first_row_config.process(
+        let mut curr_values = self.first_row_config.process(
             layouter,
             &prev_len,
             &prev_rlc,
@@ -635,14 +634,14 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
             0,
         )?;
 
-        prev_len = prev_values.0;
-        prev_rlc = prev_values.1;
-        prev_s_flag = prev_values.2;
-        prev_padding_sum = prev_values.3;
-        randomness = prev_values.4;
+        prev_len = curr_values.0;
+        prev_rlc = curr_values.1;
+        prev_s_flag = curr_values.2;
+        prev_padding_sum = curr_values.3;
+        randomness = curr_values.4;
 
         for i in 1..16 {
-            prev_values = self.middle_row_config.process(
+            curr_values = self.middle_row_config.process(
                 layouter,
                 &prev_len,
                 &prev_rlc,
@@ -653,11 +652,11 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
                 i as u32,
             )?;
 
-            prev_len = prev_values.0;
-            prev_rlc = prev_values.1;
-            prev_s_flag = prev_values.2;
-            prev_padding_sum = prev_values.3;
-            randomness = prev_values.4;
+            prev_len = curr_values.0;
+            prev_rlc = curr_values.1;
+            prev_s_flag = curr_values.2;
+            prev_padding_sum = curr_values.3;
+            randomness = curr_values.4;
         }
 
         self.last_row_config.process(
