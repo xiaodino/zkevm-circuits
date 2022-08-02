@@ -71,6 +71,7 @@ pub(crate) struct KeccakPaddingSubRow<F: Field> {
 #[derive(Clone, Debug)]
 pub struct KeccakSubRowConfig<F> {
     q_enable: Selector,
+    randomness: Column<Advice>,
     q_end: Column<Advice>,
     prev_len: Column<Advice>,
     prev_rlc: Column<Advice>,
@@ -84,7 +85,6 @@ pub struct KeccakSubRowConfig<F> {
     d_lens: [Column<Advice>; KECCAK_DATA_REGION_WIDTH / 8],
     d_rlcs: [Column<Advice>; KECCAK_DATA_REGION_WIDTH / 8],
     s_flags: [Column<Advice>; KECCAK_DATA_REGION_WIDTH / 8],
-    randomness: Column<Advice>,
 
     _marker: PhantomData<F>,
 }
@@ -92,10 +92,11 @@ pub struct KeccakSubRowConfig<F> {
 impl<F: Field> KeccakSubRowConfig<F> {
     fn configure(
         meta: &mut ConstraintSystem<F>,
+        q_enable: Selector,
+        randomness: Column<Advice>,
         is_first_row: bool,
         is_last_row: bool,
     ) -> KeccakSubRowConfig<F> {
-        let q_enable = meta.selector();
         let q_end = meta.advice_column();
         let prev_len = meta.advice_column();
         let prev_rlc = meta.advice_column();
@@ -109,7 +110,6 @@ impl<F: Field> KeccakSubRowConfig<F> {
         let d_lens = [(); KECCAK_DATA_REGION_WIDTH / 8].map(|_| meta.advice_column());
         let d_rlcs = [(); KECCAK_DATA_REGION_WIDTH / 8].map(|_| meta.advice_column());
         let s_flags = [(); KECCAK_DATA_REGION_WIDTH / 8].map(|_| meta.advice_column());
-        let randomness = meta.advice_column();
 
         meta.enable_equality(prev_len);
         meta.enable_equality(prev_rlc);
@@ -152,6 +152,11 @@ impl<F: Field> KeccakSubRowConfig<F> {
                 cb.require_boolean("boolean state bit", s);
             }
 
+            let s_0 = meta.query_advice(s_flags[0], Rotation::cur());
+            let s_prev = meta.query_advice(prev_s_flag, Rotation::cur());
+
+            cb.require_boolean("boolean state switch", s_0 - s_prev);
+
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
                 let s_i_sub1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
@@ -164,6 +169,14 @@ impl<F: Field> KeccakSubRowConfig<F> {
 
         meta.create_gate("padding bit checks", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
+
+            let s_0 = meta.query_advice(s_flags[0], Rotation::cur());
+            let s_prev = meta.query_advice(prev_s_flag, Rotation::cur());
+            let d_bit_0 = meta.query_advice(d_bits[0], Rotation::cur());
+            let s_padding_start = s_0 - s_prev;
+            cb.condition(s_padding_start, |cb| {
+                cb.require_equal("start with 1", d_bit_0, 1u64.expr());
+            });
 
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
@@ -306,6 +319,7 @@ impl<F: Field> KeccakSubRowConfig<F> {
 
         KeccakSubRowConfig {
             q_enable,
+            randomness,
             q_end,
             prev_len,
             prev_rlc,
@@ -320,7 +334,6 @@ impl<F: Field> KeccakSubRowConfig<F> {
             d_rlcs,
             s_flags,
 
-            randomness,
             _marker: PhantomData,
         }
     }
@@ -515,12 +528,7 @@ impl<F: Field> Circuit<F> for KeccakMultiGadgetPaddingCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        config.synthesize(
-            &mut layouter,
-            self.size,
-            &self.inputs,
-            KeccakMultiGadgetPaddingCircuit::r(),
-        )?;
+        config.synthesize(&mut layouter, self.size, &self.inputs)?;
         Ok(())
     }
 }
@@ -528,10 +536,13 @@ impl<F: Field> Circuit<F> for KeccakMultiGadgetPaddingCircuit<F> {
 impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
     pub(crate) fn configure(meta: &mut ConstraintSystem<F>) -> Self {
         let q_enable = meta.selector();
-        let first_row_config = KeccakSubRowConfig::configure(meta, true, false);
-        let middle_row_config = KeccakSubRowConfig::configure(meta, false, false);
-        let last_row_config = KeccakSubRowConfig::configure(meta, false, true);
         let randomness = meta.advice_column();
+        let first_row_config =
+            KeccakSubRowConfig::configure(meta, q_enable, randomness, true, false);
+        let middle_row_config =
+            KeccakSubRowConfig::configure(meta, q_enable, randomness, false, false);
+        let last_row_config =
+            KeccakSubRowConfig::configure(meta, q_enable, randomness, false, true);
 
         KeccakMultiGadgetPaddingConfig {
             q_enable,
@@ -548,7 +559,6 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
         mut layouter: &mut impl Layouter<F>,
         _size: usize,
         keccak_padding_row: &Vec<KeccakPaddingSubRow<F>>,
-        randomness: F,
     ) -> Result<(), Error> {
         assert_eq!(keccak_padding_row.len(), 17);
 
@@ -731,12 +741,12 @@ mod tests {
                 .iter()
                 .enumerate()
                 .fold(prev_padding_sum, |sum, (idx, v)| {
-                    println!(
-                        "{} + {} * {}",
-                        sum,
-                        *v,
-                        keccak_padding.s_flags[i * 8 + idx / 8]
-                    );
+                    // println!(
+                    //     "{} + {} * {}",
+                    //     sum,
+                    //     *v,
+                    //     keccak_padding.s_flags[i * 8 + idx / 8]
+                    // );
                     sum + (*v as u32) * (keccak_padding.s_flags[i * 8 + idx / 8] as u32)
                 });
             println!("{}", curr_padding_sum);
