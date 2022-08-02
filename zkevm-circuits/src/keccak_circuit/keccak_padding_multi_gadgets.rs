@@ -155,14 +155,13 @@ impl<F: Field> KeccakSubRowConfig<F> {
 
             let s_0 = meta.query_advice(s_flags[0], Rotation::cur());
             let s_prev = meta.query_advice(prev_s_flag, Rotation::cur());
-
-            cb.require_boolean("boolean state switch", s_0 - s_prev);
+            cb.require_boolean("boolean state switch from prev row", s_0 - s_prev);
 
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
                 let s_i_sub1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
 
-                cb.require_boolean("boolean state switch", s_i - s_i_sub1);
+                cb.require_boolean("boolean state switch inside row", s_i - s_i_sub1);
             }
 
             cb.gate(meta.query_selector(q_enable))
@@ -176,7 +175,11 @@ impl<F: Field> KeccakSubRowConfig<F> {
             let d_bit_0 = meta.query_advice(d_bits[0], Rotation::cur());
             let s_padding_start = s_0 - s_prev;
             cb.condition(s_padding_start, |cb| {
-                cb.require_equal("start with 1", d_bit_0, 1u64.expr());
+                cb.require_equal(
+                    "start with 1 if the padding start from pos 0",
+                    d_bit_0,
+                    1u64.expr(),
+                );
             });
 
             for i in 1..s_flags.len() {
@@ -185,7 +188,7 @@ impl<F: Field> KeccakSubRowConfig<F> {
                 let d_bit_0 = meta.query_advice(d_bits[8 * i], Rotation::cur());
                 let s_padding_start = s_i - s_i_sub1;
                 cb.condition(s_padding_start, |cb| {
-                    cb.require_equal("start with 1", d_bit_0, 1u64.expr());
+                    cb.require_equal("start with 1 inside row", d_bit_0, 1u64.expr());
                 });
             }
 
