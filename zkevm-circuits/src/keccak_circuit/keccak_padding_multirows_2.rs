@@ -278,6 +278,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 let r = meta.query_advice(randomness, Rotation::cur());
                 let input_byte_i = d_bits[i * 8..(i + 1) * 8]
                     .iter()
+                    .rev()
                     .map(|bit| meta.query_advice(*bit, Rotation::cur()))
                     .fold(0u64.expr(), |v, b| v * 2u64.expr() + b);
                 cb.require_equal(

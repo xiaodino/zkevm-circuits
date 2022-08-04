@@ -293,6 +293,7 @@ impl<F: Field> KeccakSubRowConfig<F> {
                 let r = meta.query_advice(randomness, Rotation::cur());
                 let input_byte_i = d_bits[i * 8..(i + 1) * 8]
                     .iter()
+                    .rev()
                     .map(|bit| meta.query_advice(*bit, Rotation::cur()))
                     .fold(0u64.expr(), |v, b| v * 2u64.expr() + b);
                 cb.require_equal(
@@ -721,7 +722,7 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use crate::keccak_circuit::keccak_padding::KeccakPaddingRow;
+    use crate::keccak_circuit::keccak_padding::tests::generate_padding;
 
     use super::*;
     use halo2_proofs::{dev::MockProver, pairing::bn256::Fr};
@@ -748,51 +749,16 @@ mod tests {
     }
 
     fn generate_padding_sub_rows<F: Field>(data_len: u32) -> Vec<KeccakPaddingSubRow<F>> {
-        let mut keccak_padding = KeccakPaddingRow::<F> {
-            q_end: 1u64,
-            acc_len: data_len,
-            acc_rlc: F::one(),
-            d_bits: [0; KECCAK_WIDTH],
-            d_lens: [0; KECCAK_RATE_IN_BYTES],
-            d_rlcs: [F::from(0u64); KECCAK_RATE_IN_BYTES],
-            s_flags: [false; KECCAK_RATE_IN_BYTES],
-            randomness: KeccakMultiGadgetPaddingCircuit::r(),
-        };
+        let keccak_padding = generate_padding(data_len);
 
-        let data_len_offset = data_len % KECCAK_RATE_IN_BYTES as u32;
-        let data_len_base = (data_len / KECCAK_RATE_IN_BYTES as u32) * KECCAK_RATE_IN_BYTES as u32;
-
-        keccak_padding.s_flags[0] = data_len_offset == 0u32;
-        keccak_padding.d_lens[0] = data_len_base + !keccak_padding.s_flags[0] as u32;
-
-        for i in 1 as usize..KECCAK_RATE_IN_BYTES {
-            keccak_padding.s_flags[i] = {
-                if (i as u32) < data_len_offset {
-                    false
-                } else {
-                    true
-                }
-            };
-            keccak_padding.d_lens[i] =
-                keccak_padding.d_lens[i - 1] + !keccak_padding.s_flags[i] as u32;
-        }
-
-        for i in data_len_offset as usize..KECCAK_RATE {
-            keccak_padding.d_bits[i] = 0u8;
-        }
-        keccak_padding.d_bits[data_len_offset as usize * 8] = 1;
-        keccak_padding.d_bits[KECCAK_RATE - 1] = 1;
-
-        println!("{:?}", keccak_padding.s_flags);
-        println!("{:?}", keccak_padding.d_bits);
-        println!("{:?}", keccak_padding.d_lens);
+        println!("{:?}", keccak_padding.d_rlcs);
 
         let mut out = Vec::<KeccakPaddingSubRow<F>>::new();
-        let mut curr_len = data_len_base;
-        let mut curr_rlc = F::zero();
+        let mut curr_len = keccak_padding.acc_len;
+        let mut curr_rlc = keccak_padding.acc_rlc;
         let mut curr_s_flag = false;
         let mut curr_padding_sum = 0;
-        let randomness = KeccakMultiGadgetPaddingCircuit::r();
+        let randomness = keccak_padding.randomness;
 
         for i in 0..KECCAK_RATE / 64 {
             let prev_len = curr_len;
@@ -805,11 +771,19 @@ mod tests {
                 .fold(prev_len, |sum, v| sum + (!v as u32));
             curr_rlc = keccak_padding.d_bits[i * 64..(i + 1) * 64]
                 .chunks(8)
-                .map(|bits| bits.iter().fold(0, |byte, bit| byte * 2 + bit))
+                .map(|bits| bits.iter().rev().fold(0, |byte, bit| byte * 2 + bit))
                 .zip(keccak_padding.s_flags[i * 8..(i + 1) * 8].iter())
                 .fold(prev_rlc, |rlc, (byte, flag)| {
-                    rlc * randomness + F::from(byte as u64 * (!flag as u64))
+                    if *flag {
+                        rlc
+                    } else {
+                        rlc * randomness + F::from(byte as u64)
+                    }
                 });
+
+            println!("{}, {:?}", i, curr_rlc);
+            assert_eq!(curr_rlc, keccak_padding.d_rlcs[(i + 1) * 8 - 1]);
+
             curr_s_flag = keccak_padding.s_flags[(i + 1) * 8 - 1];
             curr_padding_sum = keccak_padding.d_bits[i * 64..(i + 1) * 64]
                 .iter()
