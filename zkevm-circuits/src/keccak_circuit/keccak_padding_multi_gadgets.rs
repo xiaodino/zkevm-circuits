@@ -19,7 +19,7 @@ const KECCAK_REGION_HEIGHT: usize = KECCAK_RATE / KECCAK_DATA_REGION_WIDTH;
 #[rustfmt::skip]
 /// KeccakMultiGadgetPaddingConfig
 /// The data field of circuit Layout is like this (without selectors),
-/// each row is a KeccakSubRowConfig with 64 bits data.
+/// each row is a KeccakSubRowConfig which has 64 bits data.
 /// 
 ///        +-----------+--------------+-----------+------------+----------+-----------+------------+
 /// 1st      prev_xxxx    d_bits[64]    d_lens[8]   s_flags[8]   d_rlcs[8]  curr_xxxx   randomness  
@@ -643,7 +643,6 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
                     offset,
                     || Ok(F::zero()),
                 )?;
-
                 let randomness = region.assign_advice(
                     || format!("assign randomness{}", offset),
                     self.first_row_config.config.randomness,
@@ -750,11 +749,14 @@ mod tests {
 
     fn generate_padding_sub_rows<F: Field>(data_len: u32) -> Vec<KeccakPaddingSubRow<F>> {
         let mut keccak_padding = KeccakPaddingRow::<F> {
+            q_end: 1u64,
+            acc_len: data_len,
+            acc_rlc: F::one(),
             d_bits: [0; KECCAK_WIDTH],
             d_lens: [0; KECCAK_RATE_IN_BYTES],
             d_rlcs: [F::from(0u64); KECCAK_RATE_IN_BYTES],
             s_flags: [false; KECCAK_RATE_IN_BYTES],
-            q_end: 1u64,
+            randomness: KeccakMultiGadgetPaddingCircuit::r(),
         };
 
         let data_len_offset = data_len % KECCAK_RATE_IN_BYTES as u32;

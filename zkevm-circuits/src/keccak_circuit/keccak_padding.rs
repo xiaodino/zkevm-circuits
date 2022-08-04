@@ -8,9 +8,9 @@ use halo2_proofs::{
 };
 use std::marker::PhantomData;
 
-const KECCAK_WIDTH: usize = 5 * 5 * 64;
-const KECCAK_RATE: usize = 1088;
-const KECCAK_RATE_IN_BYTES: usize = KECCAK_RATE / 8;
+pub(crate) const KECCAK_WIDTH: usize = 5 * 5 * 64;
+pub(crate) const KECCAK_RATE: usize = 1088;
+pub(crate) const KECCAK_RATE_IN_BYTES: usize = KECCAK_RATE / 8;
 
 /// KeccakPaddingConfig
 #[derive(Clone, Debug)]
@@ -28,10 +28,13 @@ pub struct KeccakPaddingConfig<F> {
 
 pub(crate) struct KeccakPaddingRow<F: Field> {
     pub(crate) q_end: u64,
+    pub(crate) acc_len: u32,
+    pub(crate) acc_rlc: F,
     pub(crate) d_bits: [u8; KECCAK_WIDTH],
     pub(crate) d_lens: [u32; KECCAK_RATE_IN_BYTES],
     pub(crate) d_rlcs: [F; KECCAK_RATE_IN_BYTES],
     pub(crate) s_flags: [bool; KECCAK_RATE_IN_BYTES],
+    pub(crate) randomness: F,
 }
 
 /// KeccakPaddingCircuit
@@ -301,7 +304,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::marker::PhantomData;
 
     use super::*;
@@ -328,20 +331,33 @@ mod tests {
         assert_eq!(err.is_ok(), success);
     }
 
-    fn generate_padding<F: Field>(data_len: u32) -> KeccakPaddingRow<F> {
+    pub(crate) fn generate_padding<F: Field>(data_len: u32) -> KeccakPaddingRow<F> {
+        let data_len_offset = data_len % KECCAK_RATE_IN_BYTES as u32;
+        let data_len_base = (data_len / KECCAK_RATE_IN_BYTES as u32) * KECCAK_RATE_IN_BYTES as u32;
+
         let mut output = KeccakPaddingRow::<F> {
+            q_end: 1u64,
+            acc_len: data_len_base,
+            acc_rlc: F::one(),
             d_bits: [0; KECCAK_WIDTH],
             d_lens: [0; KECCAK_RATE_IN_BYTES],
             d_rlcs: [F::from(0u64); KECCAK_RATE_IN_BYTES],
             s_flags: [false; KECCAK_RATE_IN_BYTES],
-            q_end: 1u64,
+            randomness: KeccakPaddingCircuit::r(),
         };
-
-        let data_len_offset = data_len % KECCAK_RATE_IN_BYTES as u32;
-        let data_len_base = (data_len / KECCAK_RATE_IN_BYTES as u32) * KECCAK_RATE_IN_BYTES as u32;
 
         output.s_flags[0] = data_len_offset == 0u32;
         output.d_lens[0] = data_len_base + !output.s_flags[0] as u32;
+        output.d_rlcs[0] = if output.s_flags[0] {
+            output.acc_rlc
+        } else {
+            output.acc_rlc * output.randomness
+                + F::from(
+                    output.d_bits[0..8]
+                        .iter()
+                        .fold(0, |byte, bit| byte * 2 + bit) as u64,
+                )
+        };
 
         for i in 1 as usize..KECCAK_RATE_IN_BYTES {
             output.s_flags[i] = {
@@ -352,6 +368,16 @@ mod tests {
                 }
             };
             output.d_lens[i] = output.d_lens[i - 1] + !output.s_flags[i] as u32;
+            output.d_rlcs[i] = if output.s_flags[i] {
+                output.d_rlcs[i - 1]
+            } else {
+                output.d_rlcs[i - 1] * output.randomness
+                    + F::from(
+                        output.d_bits[i * 8..(i + 1) * 8]
+                            .iter()
+                            .fold(0, |byte, bit| byte * 2 + bit) as u64,
+                    )
+            }
         }
 
         for i in data_len_offset as usize..KECCAK_RATE {

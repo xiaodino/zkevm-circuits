@@ -15,6 +15,9 @@ pub mod keccak_padding;
 /// Keccak padding in multi rows
 pub mod keccak_padding_multirows;
 
+/// Keccak padding in multi rows mode 2
+pub mod keccak_padding_multirows_2;
+
 /// Keccak padding in multi gadgets
 pub mod keccak_padding_multi_gadgets;
 
