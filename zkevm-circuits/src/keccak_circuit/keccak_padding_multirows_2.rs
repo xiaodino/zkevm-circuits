@@ -21,9 +21,6 @@ pub struct KeccakPaddingConfig<F> {
     q_end: Column<Advice>,
     is_first_row: Column<Fixed>,
     is_last_row: Column<Fixed>,
-    curr_len: Column<Advice>,
-    curr_rlc: Column<Advice>,
-    curr_s_flag: Column<Advice>,
     curr_padding_sum: Column<Advice>,
     d_bits: [Column<Advice>; KECCAK_REGION_WIDTH],
     d_lens: [Column<Advice>; KECCAK_REGION_WIDTH / 8],
@@ -44,9 +41,6 @@ pub(crate) struct KeccakPaddingBlock<F: Field> {
 
 #[derive(Debug)]
 pub(crate) struct KeccakPaddingBlockRow<F: Field> {
-    pub(crate) curr_len: u32,
-    pub(crate) curr_rlc: F,
-    pub(crate) curr_s_flag: bool,
     pub(crate) curr_padding_sum: u32,
     pub(crate) d_bits: [u8; KECCAK_REGION_WIDTH],
     pub(crate) d_lens: [u32; KECCAK_REGION_WIDTH_IN_BYTES],
@@ -97,14 +91,11 @@ impl<F: Field> KeccakPaddingConfig<F> {
         let q_end = meta.advice_column();
         let is_first_row = meta.fixed_column();
         let is_last_row = meta.fixed_column();
-        let curr_len = meta.advice_column();
-        let curr_rlc = meta.advice_column();
-        let curr_s_flag = meta.advice_column();
         let curr_padding_sum = meta.advice_column();
         let d_bits = [(); KECCAK_REGION_WIDTH].map(|_| meta.advice_column());
-        let d_lens = [(); KECCAK_REGION_WIDTH / 8].map(|_| meta.advice_column());
-        let d_rlcs = [(); KECCAK_REGION_WIDTH / 8].map(|_| meta.advice_column());
-        let s_flags = [(); KECCAK_REGION_WIDTH / 8].map(|_| meta.advice_column());
+        let d_lens = [(); KECCAK_REGION_WIDTH_IN_BYTES].map(|_| meta.advice_column());
+        let d_rlcs = [(); KECCAK_REGION_WIDTH_IN_BYTES].map(|_| meta.advice_column());
+        let s_flags = [(); KECCAK_REGION_WIDTH_IN_BYTES].map(|_| meta.advice_column());
         let randomness = meta.advice_column();
 
         meta.create_gate("prev should be 0 for the 1st row", |meta| {
@@ -116,7 +107,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
             cb.condition(is_first.clone(), |cb| {
                 cb.require_zero(
                     "prev_s_flag == 0",
-                    meta.query_advice(curr_s_flag, Rotation::prev()),
+                    meta.query_advice(s_flags[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation::prev()),
                 );
             });
             cb.condition(is_first.clone(), |cb| {
@@ -163,7 +154,8 @@ impl<F: Field> KeccakPaddingConfig<F> {
             let mut cb = BaseConstraintBuilder::new(5);
 
             let s_0 = meta.query_advice(s_flags[0], Rotation::cur());
-            let s_prev = meta.query_advice(curr_s_flag, Rotation::prev());
+            let s_prev =
+                meta.query_advice(s_flags[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation::prev());
             let d_bit_0 = meta.query_advice(d_bits[0], Rotation::cur());
             let s_padding_start = s_0 - s_prev;
             cb.condition(s_padding_start, |cb| {
@@ -230,7 +222,8 @@ impl<F: Field> KeccakPaddingConfig<F> {
         meta.create_gate("input len check", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
 
-            let prev_len = meta.query_advice(curr_len, Rotation::prev());
+            let prev_len =
+                meta.query_advice(d_lens[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation::prev());
             let len_0 = meta.query_advice(d_lens[0], Rotation::cur());
             let s_0 = meta.query_advice(s_flags[0], Rotation::cur());
 
@@ -262,7 +255,8 @@ impl<F: Field> KeccakPaddingConfig<F> {
 
             let s_0 = meta.query_advice(s_flags[0], Rotation::cur());
             let rlc_0 = meta.query_advice(d_rlcs[0], Rotation::cur());
-            let rlc_prev = meta.query_advice(curr_rlc, Rotation::prev());
+            let rlc_prev =
+                meta.query_advice(d_rlcs[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation::prev());
             let input_byte_0 = d_bits[0..8]
                 .iter()
                 .map(|bit| meta.query_advice(*bit, Rotation::cur()))
@@ -318,9 +312,6 @@ impl<F: Field> KeccakPaddingConfig<F> {
             q_end,
             is_first_row,
             is_last_row,
-            curr_len,
-            curr_rlc,
-            curr_s_flag,
             curr_padding_sum,
             d_bits,
             d_lens,
@@ -359,25 +350,30 @@ impl<F: Field> KeccakPaddingConfig<F> {
 
         // setup 0 row, the prev of the enabled region
         region.assign_advice(
-            || format!("assign curr_len{}", offset),
-            self.curr_len,
+            || format!("assign prev lens{}", offset),
+            self.d_lens[KECCAK_REGION_WIDTH_IN_BYTES as usize - 1],
             offset,
             || Ok(F::from(data_block.acc_len as u64)),
         )?;
-
         region.assign_advice(
-            || format!("assign curr_rlc{}", offset),
-            self.curr_rlc,
+            || format!("assign prev rlc{}", offset),
+            self.d_rlcs[KECCAK_REGION_WIDTH_IN_BYTES as usize - 1],
             offset,
             || Ok(data_block.acc_rlc),
         )?;
-
         region.assign_advice(
-            || format!("assign curr_s_flag{}", offset),
-            self.curr_s_flag,
+            || format!("assign prev flags{}", offset),
+            self.s_flags[KECCAK_REGION_WIDTH_IN_BYTES as usize - 1],
             offset,
             || Ok(F::zero()),
         )?;
+        region.assign_advice(
+            || format!("assign randomness{}", offset),
+            self.randomness,
+            offset,
+            || Ok(F::from(randomness)),
+        )?;
+
         region.assign_advice(
             || format!("assign curr_padding_sum{}", offset),
             self.curr_padding_sum,
@@ -452,26 +448,6 @@ impl<F: Field> KeccakPaddingConfig<F> {
 
             // output the curr len,rlc,s_flag & padding
             region.assign_advice(
-                || format!("assign curr_len{}", offset),
-                self.curr_len,
-                enabled_region_offset + i,
-                || Ok(F::from(row_data.curr_len as u64)),
-            )?;
-
-            region.assign_advice(
-                || format!("assign curr_rlc{}", offset),
-                self.curr_rlc,
-                enabled_region_offset + i,
-                || Ok(row_data.curr_rlc),
-            )?;
-
-            region.assign_advice(
-                || format!("assign curr_s_flag{}", offset),
-                self.curr_s_flag,
-                enabled_region_offset + i,
-                || Ok(F::from(row_data.curr_s_flag)),
-            )?;
-            region.assign_advice(
                 || format!("assign curr_padding_sum{}", offset),
                 self.curr_padding_sum,
                 enabled_region_offset + i,
@@ -532,43 +508,18 @@ mod tests {
         keccak_padding_full_row: &KeccakPaddingRow<F>,
     ) -> KeccakPaddingBlock<F> {
         let mut rows = Vec::<KeccakPaddingBlockRow<F>>::new();
-        let mut curr_len = keccak_padding_full_row.acc_len;
-        let mut curr_rlc = keccak_padding_full_row.acc_rlc;
         let mut curr_padding_sum = 0;
-        let mut curr_s_flag: bool;
 
         for i in 0..KECCAK_REGION_HEIGHT as usize {
             let prev_padding_sum = curr_padding_sum;
-
-            curr_len =
-                keccak_padding_full_row.d_lens[(i + 1) * KECCAK_REGION_WIDTH_IN_BYTES as usize - 1];
-            println!("{:?}", curr_len);
-
-            curr_rlc =
-                keccak_padding_full_row.d_rlcs[(i + 1) * KECCAK_REGION_WIDTH_IN_BYTES as usize - 1];
-            println!("{:?}", curr_rlc);
-
-            curr_s_flag = keccak_padding_full_row.s_flags
-                [(i + 1) * KECCAK_REGION_WIDTH_IN_BYTES as usize - 1];
             curr_padding_sum = keccak_padding_full_row.d_bits[i * 64..(i + 1) * 64]
                 .iter()
                 .enumerate()
                 .fold(prev_padding_sum, |sum, (idx, v)| {
-                    // println!(
-                    //     "{} + {} * {}",
-                    //     sum,
-                    //     *v,
-                    //     keccak_padding.s_flags[i * 8 + idx / 8]
-                    // );
                     sum + (*v as u32) * (keccak_padding_full_row.s_flags[i * 8 + idx / 8] as u32)
                 });
-            println!("{}", curr_padding_sum);
-            // assert!(curr_padding_sum <= 2);
 
             let sub_row = KeccakPaddingBlockRow::<F> {
-                curr_len: curr_len,
-                curr_rlc: curr_rlc,
-                curr_s_flag: curr_s_flag,
                 curr_padding_sum: curr_padding_sum,
                 d_bits: keccak_padding_full_row.d_bits[i * 64..(i + 1) * 64]
                     .try_into()
@@ -583,6 +534,9 @@ mod tests {
                     .try_into()
                     .unwrap(),
             };
+
+            println!("{:?}", sub_row.s_flags);
+            println!("{:?}", sub_row.d_lens);
             rows.push(sub_row);
         }
 
