@@ -154,14 +154,14 @@ impl<F: Field> KeccakSubRowConfig<F> {
             }
 
             let s_0 = meta.query_advice(s_flags[0], Rotation::cur());
-            let s_prev = meta.query_advice(prev_s_flag, Rotation::cur());
-            cb.require_boolean("boolean state switch from prev row", s_0 - s_prev);
+            let s_0_prev = meta.query_advice(prev_s_flag, Rotation::cur());
+            cb.require_boolean("boolean state switch from prev row", s_0 - s_0_prev);
 
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
-                let s_i_sub1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
+                let s_i_prev = meta.query_advice(s_flags[i - 1], Rotation::cur());
 
-                cb.require_boolean("boolean state switch inside row", s_i - s_i_sub1);
+                cb.require_boolean("boolean state switch inside row", s_i - s_i_prev);
             }
 
             cb.gate(meta.query_selector(q_enable))
@@ -171,9 +171,9 @@ impl<F: Field> KeccakSubRowConfig<F> {
             let mut cb = BaseConstraintBuilder::new(5);
 
             let s_0 = meta.query_advice(s_flags[0], Rotation::cur());
-            let s_prev = meta.query_advice(prev_s_flag, Rotation::cur());
+            let s_0_prev = meta.query_advice(prev_s_flag, Rotation::cur());
             let d_bit_0 = meta.query_advice(d_bits[0], Rotation::cur());
-            let s_padding_start = s_0 - s_prev;
+            let s_padding_start = s_0 - s_0_prev;
             cb.condition(s_padding_start, |cb| {
                 cb.require_equal(
                     "start with 1 if the padding start from pos 0",
@@ -184,9 +184,9 @@ impl<F: Field> KeccakSubRowConfig<F> {
 
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
-                let s_i_sub1 = meta.query_advice(s_flags[i - 1], Rotation::cur());
+                let s_i_prev = meta.query_advice(s_flags[i - 1], Rotation::cur());
                 let d_bit_0 = meta.query_advice(d_bits[8 * i], Rotation::cur());
-                let s_padding_start = s_i - s_i_sub1;
+                let s_padding_start = s_i - s_i_prev;
                 cb.condition(s_padding_start, |cb| {
                     cb.require_equal("start with 1 inside row", d_bit_0, 1u64.expr());
                 });
@@ -250,19 +250,23 @@ impl<F: Field> KeccakSubRowConfig<F> {
             let mut cb = BaseConstraintBuilder::new(5);
 
             let len_0 = meta.query_advice(d_lens[0], Rotation::cur());
-            let prev_len = meta.query_advice(prev_len, Rotation::cur());
+            let len_0_prev = meta.query_advice(prev_len, Rotation::cur());
             let s_0 = meta.query_advice(s_flags[0], Rotation::cur());
 
-            cb.require_equal("len[0] = prev_len + !s_0", len_0, prev_len + not::expr(s_0));
+            cb.require_equal(
+                "len[0] = prev_len + !s_0",
+                len_0,
+                len_0_prev + not::expr(s_0),
+            );
 
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
                 let len_i = meta.query_advice(d_lens[i], Rotation::cur());
-                let len_i_sub1 = meta.query_advice(d_lens[i - 1], Rotation::cur());
+                let len_i_prev = meta.query_advice(d_lens[i - 1], Rotation::cur());
                 cb.require_equal(
                     "len[i] = len[i-1] + !s_i",
                     len_i,
-                    len_i_sub1 + not::expr(s_i),
+                    len_i_prev + not::expr(s_i),
                 );
             }
 
@@ -274,7 +278,7 @@ impl<F: Field> KeccakSubRowConfig<F> {
 
             let s_0 = meta.query_advice(s_flags[0], Rotation::cur());
             let rlc_0 = meta.query_advice(d_rlcs[0], Rotation::cur());
-            let rlc_prev = meta.query_advice(prev_rlc, Rotation::cur());
+            let rlc_0_prev = meta.query_advice(prev_rlc, Rotation::cur());
             let r = meta.query_advice(randomness, Rotation::cur());
             let input_byte_0 = d_bits[0..8]
                 .iter()
@@ -283,13 +287,17 @@ impl<F: Field> KeccakSubRowConfig<F> {
             cb.require_equal(
                 "rlc[i] = rlc[i-1]*r if s == 0 else rlc[i]",
                 rlc_0,
-                select::expr(s_0, rlc_prev.clone(), rlc_prev.clone() * r + input_byte_0),
+                select::expr(
+                    s_0,
+                    rlc_0_prev.clone(),
+                    rlc_0_prev.clone() * r + input_byte_0,
+                ),
             );
 
             for i in 1..s_flags.len() {
                 let s_i = meta.query_advice(s_flags[i], Rotation::cur());
                 let rlc_i = meta.query_advice(d_rlcs[i], Rotation::cur());
-                let rlc_i_sub1 = meta.query_advice(d_rlcs[i - 1], Rotation::cur());
+                let rlc_i_prev = meta.query_advice(d_rlcs[i - 1], Rotation::cur());
                 let r = meta.query_advice(randomness, Rotation::cur());
                 let input_byte_i = d_bits[i * 8..(i + 1) * 8]
                     .iter()
@@ -301,8 +309,8 @@ impl<F: Field> KeccakSubRowConfig<F> {
                     rlc_i,
                     select::expr(
                         s_i,
-                        rlc_i_sub1.clone(),
-                        rlc_i_sub1.clone() * r + input_byte_i,
+                        rlc_i_prev.clone(),
+                        rlc_i_prev.clone() * r + input_byte_i,
                     ),
                 );
             }

@@ -96,9 +96,9 @@ impl<F: Field> KeccakMultiRowPaddingConfig<F> {
 
             for i in 1..s_flag_column_builder.size() {
                 let s_i = s_flag_column_builder.query_advice(meta, i);
-                let s_i_sub1 = s_flag_column_builder.query_advice(meta, i - 1);
+                let s_i_prev = s_flag_column_builder.query_advice(meta, i - 1);
 
-                cb.require_boolean("boolean state switch", s_i - s_i_sub1);
+                cb.require_boolean("boolean state switch", s_i - s_i_prev);
             }
 
             cb.gate(meta.query_selector(q_enable))
@@ -109,9 +109,9 @@ impl<F: Field> KeccakMultiRowPaddingConfig<F> {
 
             for i in 1..s_flag_column_builder.size() {
                 let s_i = s_flag_column_builder.query_advice(meta, i);
-                let s_i_sub1 = s_flag_column_builder.query_advice(meta, i - 1);
+                let s_i_prev = s_flag_column_builder.query_advice(meta, i - 1);
                 let d_bit_0 = data_column_builder.query_advice(meta, 8 * i);
-                let s_padding_start = s_i - s_i_sub1;
+                let s_padding_start = s_i - s_i_prev;
                 cb.condition(s_padding_start, |cb| {
                     cb.require_equal("start with 1", d_bit_0, 1u64.expr());
                 });
@@ -148,12 +148,12 @@ impl<F: Field> KeccakMultiRowPaddingConfig<F> {
             for i in 1..s_flag_column_builder.size() {
                 let s_i = s_flag_column_builder.query_advice(meta, i);
                 let len_i = len_column_builder.query_advice(meta, i);
-                let len_i_sub1 = len_column_builder.query_advice(meta, i - 1);
+                let len_i_prev = len_column_builder.query_advice(meta, i - 1);
 
                 cb.require_equal(
                     "len[i] = len[i-1] + !s_i",
                     len_i,
-                    len_i_sub1 + not::expr(s_i),
+                    len_i_prev + not::expr(s_i),
                 );
             }
 
@@ -166,7 +166,7 @@ impl<F: Field> KeccakMultiRowPaddingConfig<F> {
             for i in 1..s_flag_column_builder.size() {
                 let s_i = s_flag_column_builder.query_advice(meta, i);
                 let rlc_i = rls_column_builder.query_advice(meta, i);
-                let rlc_i_sub1 = rls_column_builder.query_advice(meta, i - 1);
+                let rlc_i_prev = rls_column_builder.query_advice(meta, i - 1);
 
                 let r = meta.query_advice(randomness, Rotation::cur());
                 let input_byte_i = (i * 8..(i + 1) * 8)
@@ -178,8 +178,8 @@ impl<F: Field> KeccakMultiRowPaddingConfig<F> {
                     rlc_i,
                     select::expr(
                         s_i,
-                        rlc_i_sub1.clone(),
-                        rlc_i_sub1.clone() * r + input_byte_i,
+                        rlc_i_prev.clone(),
+                        rlc_i_prev.clone() * r + input_byte_i,
                     ),
                 )
             }
