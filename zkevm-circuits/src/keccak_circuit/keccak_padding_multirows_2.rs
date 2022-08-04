@@ -345,10 +345,14 @@ impl<F: Field> KeccakPaddingConfig<F> {
         data_block: &KeccakPaddingBlock<F>,
         randomness: F,
     ) -> Result<(), Error> {
-        let enabled_region_offset = offset + 1;
-        self.q_enable.enable(region, enabled_region_offset)?;
-
-        // setup 0 row, the prev of the enabled region
+        // setup 0th row, used as the prev row of the enabled region, i.e.,
+        // relatively -1 row.
+        //
+        //         relative pos     cell         offset
+        //  row[0]  -1              prev_values  Rotation::prev()
+        //  row[1]   0              curr_values  Rotation::cur()
+        //  ...
+        //  row[N]  N-1             ...          ...
         region.assign_advice(
             || format!("assign prev lens{}", offset),
             self.d_lens[KECCAK_REGION_WIDTH_IN_BYTES as usize - 1],
@@ -389,6 +393,9 @@ impl<F: Field> KeccakPaddingConfig<F> {
 
         //then the row setup loop
         for i in 0..KECCAK_REGION_HEIGHT as usize {
+            let enabled_region_offset = offset + 1 + i;
+            self.q_enable.enable(region, enabled_region_offset)?;
+
             // Input bits w/ padding
             let row_data = &data_block.block_rows[i];
             let d_bits = row_data.d_bits;
@@ -400,7 +407,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 region.assign_advice(
                     || format!("assign input data bit {} {}", idx, offset),
                     *column,
-                    enabled_region_offset + i,
+                    enabled_region_offset,
                     || Ok(F::from(*bit as u64)),
                 )?;
             }
@@ -409,7 +416,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 region.assign_advice(
                     || format!("assign input data select flag {} {}", idx, offset),
                     *column,
-                    enabled_region_offset + i,
+                    enabled_region_offset,
                     || Ok(F::from(*s_flag as u64)),
                 )?;
             }
@@ -418,7 +425,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 region.assign_advice(
                     || format!("assign input data len {} {}", idx, offset),
                     *column,
-                    enabled_region_offset + i,
+                    enabled_region_offset,
                     || Ok(F::from(*d_len as u64)),
                 )?;
             }
@@ -427,7 +434,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 region.assign_advice(
                     || format!("assign input data rlc {} {}", idx, offset),
                     *column,
-                    enabled_region_offset + i,
+                    enabled_region_offset,
                     || Ok(*d_rlc),
                 )?;
             }
@@ -435,14 +442,14 @@ impl<F: Field> KeccakPaddingConfig<F> {
             region.assign_fixed(
                 || format!("assign fixed first flag {}", offset),
                 self.is_first_row,
-                enabled_region_offset + i,
+                enabled_region_offset,
                 || Ok(F::from((i == 0) as u64)),
             )?;
 
             region.assign_fixed(
                 || format!("assign fixed first flag {}", offset),
                 self.is_last_row,
-                enabled_region_offset + i,
+                enabled_region_offset,
                 || Ok(F::from((i + 1 == KECCAK_REGION_HEIGHT as usize) as u64)),
             )?;
 
@@ -450,21 +457,21 @@ impl<F: Field> KeccakPaddingConfig<F> {
             region.assign_advice(
                 || format!("assign curr_padding_sum{}", offset),
                 self.curr_padding_sum,
-                enabled_region_offset + i,
+                enabled_region_offset,
                 || Ok(F::from(row_data.curr_padding_sum as u64)),
             )?;
 
             region.assign_advice(
                 || format!("assign randomness{}", offset),
                 self.randomness,
-                enabled_region_offset + i,
+                enabled_region_offset,
                 || Ok(F::from(randomness)),
             )?;
 
             region.assign_advice(
                 || format!("assign q_end{}", offset),
                 self.q_end,
-                enabled_region_offset + i,
+                enabled_region_offset,
                 || Ok(F::from(data_block.q_end)),
             )?;
         }
