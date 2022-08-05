@@ -91,7 +91,10 @@ mod tests {
 
     #[test]
     fn bench_naive_keccak_padding_circuit_prover() {
-        let degree: u32 = var("DEGREE").unwrap_or("12").parse()
+        let degree: u32 = var("DEGREE")
+            .unwrap_or(String::from("12"))
+            .parse()
+            .expect("Cannot parse DEGREE env var as u32");
 
         let params: Option<Params<G1Affine>> = {
             let params_path = format!(
@@ -110,7 +113,10 @@ mod tests {
 
     #[test]
     fn bench_keccak_padding_multi_gadgets_circuit_prover() {
-        let degree: u32 = var("DEGREE").unwrap_or("12").parse()
+        let degree: u32 = var("DEGREE")
+            .unwrap_or(String::from("12"))
+            .parse()
+            .expect("Cannot parse DEGREE env var as u32");
 
         let params: Option<Params<G1Affine>> = {
             let params_path = format!(
@@ -128,7 +134,10 @@ mod tests {
 
     #[test]
     fn bench_keccak_padding_multi_row_circuit_prover() {
-        let degree: u32 = var("DEGREE").unwrap_or("12").parse()
+        let degree: u32 = var("DEGREE")
+            .unwrap_or(String::from("12"))
+            .parse()
+            .expect("Cannot parse DEGREE env var as u32");
 
         let params: Option<Params<G1Affine>> = {
             let params_path = format!(
@@ -147,7 +156,10 @@ mod tests {
 
     #[test]
     fn bench_keccak_padding_multi_row_2_circuit_prover() {
-        let degree: u32 = var("DEGREE").unwrap_or("12").parse()
+        let degree: u32 = var("DEGREE")
+            .unwrap_or(String::from("12"))
+            .parse()
+            .expect("Cannot parse DEGREE env var as u32");
 
         let params: Option<Params<G1Affine>> = {
             let params_path = format!(
