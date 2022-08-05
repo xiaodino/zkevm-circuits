@@ -9,6 +9,8 @@ use halo2_proofs::{
 };
 use std::marker::PhantomData;
 
+use super::keccak_padding::KeccakPaddingRow;
+
 const KECCAK_WIDTH: usize = 5 * 5 * 64;
 const KECCAK_RATE: usize = 1088;
 const KECCAK_RATE_IN_BYTES: usize = KECCAK_RATE / 8;
@@ -522,17 +524,102 @@ impl<F: Field> KeccakSubRowConfig<F> {
     }
 }
 
-/// KeccakPaddingCircuit
-#[derive(Default)]
+/// KeccakMultiGadgetPaddingCircuit
 pub struct KeccakMultiGadgetPaddingCircuit<F: Field> {
     inputs: Vec<KeccakPaddingSubRow<F>>,
     size: usize,
     _marker: PhantomData<F>,
 }
 
+impl<F: Field> Default for KeccakMultiGadgetPaddingCircuit<F> {
+    fn default() -> KeccakMultiGadgetPaddingCircuit<F> {
+        KeccakMultiGadgetPaddingCircuit {
+            inputs: KeccakMultiGadgetPaddingCircuit::<F>::generate_padding_sub_rows(0),
+            size: 2usize.pow(8),
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl<F: Field> KeccakMultiGadgetPaddingCircuit<F> {
     fn r() -> F {
         F::from(123456)
+    }
+
+    fn generate_padding_sub_rows(data_len: u32) -> Vec<KeccakPaddingSubRow<F>> {
+        let keccak_padding = KeccakPaddingRow::generate_padding(data_len);
+
+        let mut out = Vec::<KeccakPaddingSubRow<F>>::new();
+        let mut curr_len = keccak_padding.acc_len;
+        let mut curr_rlc = keccak_padding.acc_rlc;
+        let mut curr_s_flag = false;
+        let mut curr_padding_sum = 0;
+        let randomness = keccak_padding.randomness;
+
+        for i in 0..KECCAK_RATE / 64 {
+            let prev_len = curr_len;
+            let prev_rlc = curr_rlc;
+            let prev_s_flag = curr_s_flag;
+            let prev_padding_sum = curr_padding_sum;
+
+            curr_len = keccak_padding.s_flags[i * 8..(i + 1) * 8]
+                .iter()
+                .fold(prev_len, |sum, v| sum + (!v as u32));
+            curr_rlc = keccak_padding.d_bits[i * 64..(i + 1) * 64]
+                .chunks(8)
+                .map(|bits| bits.iter().rev().fold(0, |byte, bit| byte * 2 + bit))
+                .zip(keccak_padding.s_flags[i * 8..(i + 1) * 8].iter())
+                .fold(prev_rlc, |rlc, (byte, flag)| {
+                    if *flag {
+                        rlc
+                    } else {
+                        rlc * randomness + F::from(byte as u64)
+                    }
+                });
+            assert_eq!(curr_rlc, keccak_padding.d_rlcs[(i + 1) * 8 - 1]);
+
+            curr_s_flag = keccak_padding.s_flags[(i + 1) * 8 - 1];
+            curr_padding_sum = keccak_padding.d_bits[i * 64..(i + 1) * 64]
+                .iter()
+                .enumerate()
+                .fold(prev_padding_sum, |sum, (idx, v)| {
+                    // println!(
+                    //     "{} + {} * {}",
+                    //     sum,
+                    //     *v,
+                    //     keccak_padding.s_flags[i * 8 + idx / 8]
+                    // );
+                    sum + (*v as u32) * (keccak_padding.s_flags[i * 8 + idx / 8] as u32)
+                });
+
+            let sub_row = KeccakPaddingSubRow::<F> {
+                q_end: 1u64,
+                prev_len,
+                prev_rlc,
+                prev_s_flag,
+                prev_padding_sum,
+                curr_len: curr_len,
+                curr_rlc: curr_rlc,
+                curr_s_flag: curr_s_flag,
+                curr_padding_sum: curr_padding_sum,
+                randomness: randomness,
+                d_bits: keccak_padding.d_bits[i * 64..(i + 1) * 64]
+                    .try_into()
+                    .unwrap(),
+                d_lens: keccak_padding.d_lens[i * 8..(i + 1) * 8]
+                    .try_into()
+                    .unwrap(),
+                d_rlcs: keccak_padding.d_rlcs[i * 8..(i + 1) * 8]
+                    .try_into()
+                    .unwrap(),
+                s_flags: keccak_padding.s_flags[i * 8..(i + 1) * 8]
+                    .try_into()
+                    .unwrap(),
+            };
+            out.push(sub_row);
+        }
+
+        out
     }
 }
 
@@ -730,8 +817,6 @@ impl<F: Field> KeccakMultiGadgetPaddingConfig<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use crate::keccak_circuit::keccak_padding::tests::generate_padding;
-
     use super::*;
     use halo2_proofs::{dev::MockProver, pairing::bn256::Fr};
 
@@ -757,85 +842,7 @@ mod tests {
     }
 
     fn generate_padding_sub_rows<F: Field>(data_len: u32) -> Vec<KeccakPaddingSubRow<F>> {
-        let keccak_padding = generate_padding(data_len);
-
-        println!("{:?}", keccak_padding.d_rlcs);
-
-        let mut out = Vec::<KeccakPaddingSubRow<F>>::new();
-        let mut curr_len = keccak_padding.acc_len;
-        let mut curr_rlc = keccak_padding.acc_rlc;
-        let mut curr_s_flag = false;
-        let mut curr_padding_sum = 0;
-        let randomness = keccak_padding.randomness;
-
-        for i in 0..KECCAK_RATE / 64 {
-            let prev_len = curr_len;
-            let prev_rlc = curr_rlc;
-            let prev_s_flag = curr_s_flag;
-            let prev_padding_sum = curr_padding_sum;
-
-            curr_len = keccak_padding.s_flags[i * 8..(i + 1) * 8]
-                .iter()
-                .fold(prev_len, |sum, v| sum + (!v as u32));
-            curr_rlc = keccak_padding.d_bits[i * 64..(i + 1) * 64]
-                .chunks(8)
-                .map(|bits| bits.iter().rev().fold(0, |byte, bit| byte * 2 + bit))
-                .zip(keccak_padding.s_flags[i * 8..(i + 1) * 8].iter())
-                .fold(prev_rlc, |rlc, (byte, flag)| {
-                    if *flag {
-                        rlc
-                    } else {
-                        rlc * randomness + F::from(byte as u64)
-                    }
-                });
-
-            println!("{}, {:?}", i, curr_rlc);
-            assert_eq!(curr_rlc, keccak_padding.d_rlcs[(i + 1) * 8 - 1]);
-
-            curr_s_flag = keccak_padding.s_flags[(i + 1) * 8 - 1];
-            curr_padding_sum = keccak_padding.d_bits[i * 64..(i + 1) * 64]
-                .iter()
-                .enumerate()
-                .fold(prev_padding_sum, |sum, (idx, v)| {
-                    // println!(
-                    //     "{} + {} * {}",
-                    //     sum,
-                    //     *v,
-                    //     keccak_padding.s_flags[i * 8 + idx / 8]
-                    // );
-                    sum + (*v as u32) * (keccak_padding.s_flags[i * 8 + idx / 8] as u32)
-                });
-            println!("{}", curr_padding_sum);
-            assert!(curr_padding_sum <= 2);
-
-            let sub_row = KeccakPaddingSubRow::<F> {
-                q_end: 1u64,
-                prev_len,
-                prev_rlc,
-                prev_s_flag,
-                prev_padding_sum,
-                curr_len: curr_len,
-                curr_rlc: curr_rlc,
-                curr_s_flag: curr_s_flag,
-                curr_padding_sum: curr_padding_sum,
-                randomness: randomness,
-                d_bits: keccak_padding.d_bits[i * 64..(i + 1) * 64]
-                    .try_into()
-                    .unwrap(),
-                d_lens: keccak_padding.d_lens[i * 8..(i + 1) * 8]
-                    .try_into()
-                    .unwrap(),
-                d_rlcs: keccak_padding.d_rlcs[i * 8..(i + 1) * 8]
-                    .try_into()
-                    .unwrap(),
-                s_flags: keccak_padding.s_flags[i * 8..(i + 1) * 8]
-                    .try_into()
-                    .unwrap(),
-            };
-            out.push(sub_row);
-        }
-
-        out
+        KeccakMultiGadgetPaddingCircuit::generate_padding_sub_rows(data_len)
     }
 
     static K: u32 = 8;

@@ -29,12 +29,21 @@ pub struct KeccakMultiRowPaddingConfig<F> {
     _marker: PhantomData<F>,
 }
 
-/// KeccakPaddingCircuit
-#[derive(Default)]
+/// KeccakMultiRowPaddingCircuit
 pub struct KeccakMultiRowPaddingCircuit<F: Field> {
     inputs: Vec<KeccakPaddingRow<F>>,
     size: usize,
     _marker: PhantomData<F>,
+}
+
+impl<F: Field> Default for KeccakMultiRowPaddingCircuit<F> {
+    fn default() -> Self {
+        KeccakMultiRowPaddingCircuit::<F> {
+            inputs: vec![KeccakPaddingRow::generate_padding(0)],
+            size: 2usize.pow(4),
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<F: Field> KeccakMultiRowPaddingCircuit<F> {

@@ -37,10 +37,77 @@ pub(crate) struct KeccakPaddingRow<F: Field> {
     pub(crate) randomness: F,
 }
 
+impl<F: Field> KeccakPaddingRow<F> {
+    pub(crate) fn generate_padding(data_len: u32) -> KeccakPaddingRow<F> {
+        let data_len_offset = data_len % KECCAK_RATE_IN_BYTES as u32;
+        let data_len_base = (data_len / KECCAK_RATE_IN_BYTES as u32) * KECCAK_RATE_IN_BYTES as u32;
+
+        let mut output = KeccakPaddingRow::<F> {
+            q_end: 1u64,
+            acc_len: data_len_base,
+            acc_rlc: F::one(),
+            d_bits: [0; KECCAK_WIDTH],
+            d_lens: [0; KECCAK_RATE_IN_BYTES],
+            d_rlcs: [F::from(0u64); KECCAK_RATE_IN_BYTES],
+            s_flags: [false; KECCAK_RATE_IN_BYTES],
+            randomness: KeccakPaddingCircuit::r(),
+        };
+
+        output.s_flags[0] = data_len_offset == 0u32;
+        output.d_lens[0] = data_len_base + !output.s_flags[0] as u32;
+        output.d_rlcs[0] = if output.s_flags[0] {
+            output.acc_rlc
+        } else {
+            output.acc_rlc * output.randomness
+                + F::from(
+                    output.d_bits[0..8]
+                        .iter()
+                        .rev()
+                        .fold(0, |byte, bit| byte * 2 + bit) as u64,
+                )
+        };
+
+        for i in 1 as usize..KECCAK_RATE_IN_BYTES {
+            output.s_flags[i] = {
+                if (i as u32) < data_len_offset {
+                    false
+                } else {
+                    true
+                }
+            };
+            output.d_lens[i] = output.d_lens[i - 1] + !output.s_flags[i] as u32;
+            output.d_rlcs[i] = if output.s_flags[i] {
+                output.d_rlcs[i - 1]
+            } else {
+                output.d_rlcs[i - 1] * output.randomness
+                    + F::from(
+                        output.d_bits[i * 8..(i + 1) * 8]
+                            .iter()
+                            .fold(0, |byte, bit| byte * 2 + bit) as u64,
+                    )
+            }
+        }
+
+        for i in data_len_offset as usize..KECCAK_RATE {
+            output.d_bits[i] = 0u8;
+        }
+        output.d_bits[data_len_offset as usize * 8] = 1;
+        output.d_bits[KECCAK_RATE - 1] = 1;
+
+        output
+    }
+}
+
+impl<F: Field> Default for KeccakPaddingRow<F> {
+    fn default() -> KeccakPaddingRow<F> {
+        KeccakPaddingRow::<F>::generate_padding(0)
+    }
+}
+
 /// KeccakPaddingCircuit
 #[derive(Default)]
 pub struct KeccakPaddingCircuit<F: Field> {
-    inputs: Vec<KeccakPaddingRow<F>>,
+    input: KeccakPaddingRow<F>,
     size: usize,
     _marker: PhantomData<F>,
 }
@@ -64,12 +131,7 @@ impl<F: Field> Circuit<F> for KeccakPaddingCircuit<F> {
     }
 
     fn synthesize(&self, config: Self::Config, layouter: impl Layouter<F>) -> Result<(), Error> {
-        config.assign(
-            layouter,
-            self.size,
-            &self.inputs[0],
-            KeccakPaddingCircuit::r(),
-        )?;
+        config.assign(layouter, self.size, &self.input, KeccakPaddingCircuit::r())?;
         Ok(())
     }
 }
@@ -311,9 +373,9 @@ pub(crate) mod tests {
     use super::*;
     use halo2_proofs::{dev::MockProver, pairing::bn256::Fr};
 
-    fn verify<F: Field>(k: u32, inputs: Vec<KeccakPaddingRow<F>>, success: bool) {
+    fn verify<F: Field>(k: u32, input: KeccakPaddingRow<F>, success: bool) {
         let circuit = KeccakPaddingCircuit::<F> {
-            inputs,
+            input,
             size: 2usize.pow(k),
             _marker: PhantomData,
         };
@@ -333,65 +395,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn generate_padding<F: Field>(data_len: u32) -> KeccakPaddingRow<F> {
-        let data_len_offset = data_len % KECCAK_RATE_IN_BYTES as u32;
-        let data_len_base = (data_len / KECCAK_RATE_IN_BYTES as u32) * KECCAK_RATE_IN_BYTES as u32;
-
-        let mut output = KeccakPaddingRow::<F> {
-            q_end: 1u64,
-            acc_len: data_len_base,
-            acc_rlc: F::one(),
-            d_bits: [0; KECCAK_WIDTH],
-            d_lens: [0; KECCAK_RATE_IN_BYTES],
-            d_rlcs: [F::from(0u64); KECCAK_RATE_IN_BYTES],
-            s_flags: [false; KECCAK_RATE_IN_BYTES],
-            randomness: KeccakPaddingCircuit::r(),
-        };
-
-        output.s_flags[0] = data_len_offset == 0u32;
-        output.d_lens[0] = data_len_base + !output.s_flags[0] as u32;
-        output.d_rlcs[0] = if output.s_flags[0] {
-            output.acc_rlc
-        } else {
-            output.acc_rlc * output.randomness
-                + F::from(
-                    output.d_bits[0..8]
-                        .iter()
-                        .rev()
-                        .fold(0, |byte, bit| byte * 2 + bit) as u64,
-                )
-        };
-
-        for i in 1 as usize..KECCAK_RATE_IN_BYTES {
-            output.s_flags[i] = {
-                if (i as u32) < data_len_offset {
-                    false
-                } else {
-                    true
-                }
-            };
-            output.d_lens[i] = output.d_lens[i - 1] + !output.s_flags[i] as u32;
-            output.d_rlcs[i] = if output.s_flags[i] {
-                output.d_rlcs[i - 1]
-            } else {
-                output.d_rlcs[i - 1] * output.randomness
-                    + F::from(
-                        output.d_bits[i * 8..(i + 1) * 8]
-                            .iter()
-                            .fold(0, |byte, bit| byte * 2 + bit) as u64,
-                    )
-            }
-        }
-
-        for i in data_len_offset as usize..KECCAK_RATE {
-            output.d_bits[i] = 0u8;
-        }
-        output.d_bits[data_len_offset as usize * 8] = 1;
-        output.d_bits[KECCAK_RATE - 1] = 1;
-
-        println!("{:?}", output.s_flags);
-        println!("{:?}", output.d_bits);
-        println!("{:?}", output.d_lens);
-        output
+        KeccakPaddingRow::generate_padding(data_len)
     }
 
     static K: u32 = 8;
@@ -399,31 +403,31 @@ pub(crate) mod tests {
     #[test]
     fn bit_keccak_len_0() {
         let input = generate_padding::<Fr>(0);
-        verify::<Fr>(K, vec![input], true);
+        verify::<Fr>(K, input, true);
     }
 
     #[test]
     fn bit_keccak_len_1() {
         let input = generate_padding::<Fr>(1);
-        verify::<Fr>(K, vec![input], true);
+        verify::<Fr>(K, input, true);
     }
 
     #[test]
     fn bit_keccak_len_2() {
         let input = generate_padding::<Fr>(2);
-        verify::<Fr>(K, vec![input], true);
+        verify::<Fr>(K, input, true);
     }
 
     #[test]
     fn bit_keccak_len_135() {
         let input = generate_padding::<Fr>(135);
-        verify::<Fr>(K, vec![input], true);
+        verify::<Fr>(K, input, true);
     }
 
     #[test]
     fn bit_keccak_len_300() {
         let input = generate_padding::<Fr>(300);
-        verify::<Fr>(K, vec![input], true);
+        verify::<Fr>(K, input, true);
     }
 
     #[test]
@@ -431,7 +435,7 @@ pub(crate) mod tests {
         // first bit is 0
         let mut input = generate_padding::<Fr>(11);
         input.d_bits[11 * 8] = 0u8;
-        verify::<Fr>(K, vec![input], false);
+        verify::<Fr>(K, input, false);
     }
 
     #[test]
@@ -439,7 +443,7 @@ pub(crate) mod tests {
         // last bit is 0
         let mut input = generate_padding::<Fr>(73);
         input.d_bits[KECCAK_RATE - 1] = 0u8;
-        verify::<Fr>(K, vec![input], false);
+        verify::<Fr>(K, input, false);
     }
 
     #[test]
@@ -447,7 +451,7 @@ pub(crate) mod tests {
         // some 1 in padding
         let mut input = generate_padding::<Fr>(123);
         input.d_bits[KECCAK_RATE - 2] = 1u8;
-        verify::<Fr>(K, vec![input], false);
+        verify::<Fr>(K, input, false);
     }
 
     #[test]
@@ -455,6 +459,6 @@ pub(crate) mod tests {
         // wrong len
         let mut input = generate_padding::<Fr>(123);
         input.d_lens[124] = 124;
-        verify::<Fr>(K, vec![input], false);
+        verify::<Fr>(K, input, false);
     }
 }

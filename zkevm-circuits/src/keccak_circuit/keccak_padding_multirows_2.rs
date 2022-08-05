@@ -8,6 +8,8 @@ use halo2_proofs::{
 };
 use std::marker::PhantomData;
 
+use crate::keccak_circuit::keccak_padding::KeccakPaddingRow;
+
 const KECCAK_REGION_WIDTH: usize = 64;
 const KECCAK_REGION_WIDTH_IN_BYTES: usize = KECCAK_REGION_WIDTH / 8;
 const KECCAK_REGION_HEIGHT: u64 = 17;
@@ -39,6 +41,48 @@ pub(crate) struct KeccakPaddingBlock<F: Field> {
     pub(crate) block_rows: [KeccakPaddingBlockRow<F>; KECCAK_REGION_HEIGHT as usize],
 }
 
+impl<F: Field> From<KeccakPaddingRow<F>> for KeccakPaddingBlock<F> {
+    fn from(keccak_padding_full_row: KeccakPaddingRow<F>) -> Self {
+        let mut rows = Vec::<KeccakPaddingBlockRow<F>>::new();
+        let mut curr_padding_sum = 0;
+
+        for i in 0..KECCAK_REGION_HEIGHT as usize {
+            let prev_padding_sum = curr_padding_sum;
+            curr_padding_sum = keccak_padding_full_row.d_bits[i * 64..(i + 1) * 64]
+                .iter()
+                .enumerate()
+                .fold(prev_padding_sum, |sum, (idx, v)| {
+                    sum + (*v as u32) * (keccak_padding_full_row.s_flags[i * 8 + idx / 8] as u32)
+                });
+
+            let sub_row = KeccakPaddingBlockRow::<F> {
+                curr_padding_sum: curr_padding_sum,
+                d_bits: keccak_padding_full_row.d_bits[i * 64..(i + 1) * 64]
+                    .try_into()
+                    .unwrap(),
+                d_lens: keccak_padding_full_row.d_lens[i * 8..(i + 1) * 8]
+                    .try_into()
+                    .unwrap(),
+                d_rlcs: keccak_padding_full_row.d_rlcs[i * 8..(i + 1) * 8]
+                    .try_into()
+                    .unwrap(),
+                s_flags: keccak_padding_full_row.s_flags[i * 8..(i + 1) * 8]
+                    .try_into()
+                    .unwrap(),
+            };
+
+            rows.push(sub_row);
+        }
+
+        KeccakPaddingBlock::<F> {
+            q_end: 1u64,
+            acc_len: keccak_padding_full_row.acc_len,
+            acc_rlc: keccak_padding_full_row.acc_rlc,
+            block_rows: rows.try_into().unwrap(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct KeccakPaddingBlockRow<F: Field> {
     pub(crate) curr_padding_sum: u32,
@@ -48,21 +92,31 @@ pub(crate) struct KeccakPaddingBlockRow<F: Field> {
     pub(crate) s_flags: [bool; KECCAK_REGION_WIDTH_IN_BYTES],
 }
 
-/// KeccakPaddingCircuit
-#[derive(Default)]
-pub struct KeccakPaddingCircuit<F: Field> {
+/// KeccakPaddingMultiRowsExCircuit
+pub struct KeccakPaddingMultiRowsExCircuit<F: Field> {
     inputs: Vec<KeccakPaddingBlock<F>>,
     size: usize,
     _marker: PhantomData<F>,
 }
 
-impl<F: Field> KeccakPaddingCircuit<F> {
+impl<F: Field> Default for KeccakPaddingMultiRowsExCircuit<F> {
+    fn default() -> Self {
+        let input_block: KeccakPaddingBlock<F> = KeccakPaddingRow::generate_padding(0).into();
+        KeccakPaddingMultiRowsExCircuit::<F> {
+            inputs: vec![input_block],
+            size: 2usize.pow(4),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<F: Field> KeccakPaddingMultiRowsExCircuit<F> {
     fn r() -> F {
         F::from(123456)
     }
 }
 
-impl<F: Field> Circuit<F> for KeccakPaddingCircuit<F> {
+impl<F: Field> Circuit<F> for KeccakPaddingMultiRowsExCircuit<F> {
     type Config = KeccakPaddingConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -79,7 +133,7 @@ impl<F: Field> Circuit<F> for KeccakPaddingCircuit<F> {
             layouter,
             self.size,
             &self.inputs[0],
-            KeccakPaddingCircuit::r(),
+            KeccakPaddingMultiRowsExCircuit::r(),
         )?;
         Ok(())
     }
@@ -472,14 +526,11 @@ impl<F: Field> KeccakPaddingConfig<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use crate::keccak_circuit::keccak_padding::tests::generate_padding;
-    use crate::keccak_circuit::keccak_padding::KeccakPaddingRow;
-
     use super::*;
     use halo2_proofs::{dev::MockProver, pairing::bn256::Fr};
 
     fn verify<F: Field>(k: u32, input: KeccakPaddingBlock<F>, success: bool) {
-        let circuit = KeccakPaddingCircuit::<F> {
+        let circuit = KeccakPaddingMultiRowsExCircuit::<F> {
             inputs: vec![input],
             size: 2usize.pow(k),
             _marker: PhantomData,
@@ -499,122 +550,76 @@ mod tests {
         assert_eq!(err.is_ok(), success);
     }
 
-    fn from_full_padding_block<F: Field>(
-        keccak_padding_full_row: &KeccakPaddingRow<F>,
-    ) -> KeccakPaddingBlock<F> {
-        let mut rows = Vec::<KeccakPaddingBlockRow<F>>::new();
-        let mut curr_padding_sum = 0;
-
-        for i in 0..KECCAK_REGION_HEIGHT as usize {
-            let prev_padding_sum = curr_padding_sum;
-            curr_padding_sum = keccak_padding_full_row.d_bits[i * 64..(i + 1) * 64]
-                .iter()
-                .enumerate()
-                .fold(prev_padding_sum, |sum, (idx, v)| {
-                    sum + (*v as u32) * (keccak_padding_full_row.s_flags[i * 8 + idx / 8] as u32)
-                });
-
-            let sub_row = KeccakPaddingBlockRow::<F> {
-                curr_padding_sum: curr_padding_sum,
-                d_bits: keccak_padding_full_row.d_bits[i * 64..(i + 1) * 64]
-                    .try_into()
-                    .unwrap(),
-                d_lens: keccak_padding_full_row.d_lens[i * 8..(i + 1) * 8]
-                    .try_into()
-                    .unwrap(),
-                d_rlcs: keccak_padding_full_row.d_rlcs[i * 8..(i + 1) * 8]
-                    .try_into()
-                    .unwrap(),
-                s_flags: keccak_padding_full_row.s_flags[i * 8..(i + 1) * 8]
-                    .try_into()
-                    .unwrap(),
-            };
-
-            println!("{:?}", sub_row.s_flags);
-            println!("{:?}", sub_row.d_lens);
-            rows.push(sub_row);
-        }
-
-        KeccakPaddingBlock::<F> {
-            q_end: 1u64,
-            acc_len: keccak_padding_full_row.acc_len,
-            acc_rlc: keccak_padding_full_row.acc_rlc,
-            block_rows: rows.try_into().unwrap(),
-        }
-    }
-
     static K: u32 = 8;
 
     #[test]
     fn bit_keccak_len_0() {
-        let full_data = generate_padding::<Fr>(0);
-        let input = from_full_padding_block(&full_data);
+        let full_data = KeccakPaddingRow::<Fr>::generate_padding(0);
+        let input = full_data.into();
         verify::<Fr>(K, input, true);
     }
 
     #[test]
     fn bit_keccak_len_1() {
-        let full_data = generate_padding::<Fr>(1);
-        let input = from_full_padding_block(&full_data);
+        let full_data = KeccakPaddingRow::<Fr>::generate_padding(1);
+        let input = full_data.into();
         verify::<Fr>(K, input, true);
     }
 
     #[test]
     fn bit_keccak_len_2() {
-        let full_data = generate_padding::<Fr>(2);
-        let input = from_full_padding_block(&full_data);
+        let full_data = KeccakPaddingRow::<Fr>::generate_padding(2);
+        let input = full_data.into();
         verify::<Fr>(K, input, true);
     }
 
     #[test]
     fn bit_keccak_len_135() {
-        let full_data = generate_padding::<Fr>(135);
-        let input = from_full_padding_block(&full_data);
-
+        let full_data = KeccakPaddingRow::<Fr>::generate_padding(135);
+        let input = full_data.into();
         verify::<Fr>(K, input, true);
     }
 
     #[test]
     fn bit_keccak_len_300() {
-        let full_data = generate_padding::<Fr>(300);
-        let input = from_full_padding_block(&full_data);
-
+        let full_data = KeccakPaddingRow::<Fr>::generate_padding(300);
+        let input = full_data.into();
         verify::<Fr>(K, input, true);
     }
 
     #[test]
     fn bit_keccak_invalid_padding_begin() {
         // first bit is 0
-        let mut full_data = generate_padding::<Fr>(11);
+        let mut full_data = KeccakPaddingRow::<Fr>::generate_padding(11);
         full_data.d_bits[11 * 8] = 0u8;
-        let input = from_full_padding_block(&full_data);
+        let input = full_data.into();
         verify::<Fr>(K, input, false);
     }
 
     #[test]
     fn bit_keccak_invalid_padding_end() {
         // last bit is 0
-        let mut full_data = generate_padding::<Fr>(73);
+        let mut full_data = KeccakPaddingRow::<Fr>::generate_padding(73);
         full_data.d_bits[KECCAK_RATE - 1] = 0u8;
-        let input = from_full_padding_block(&full_data);
+        let input = full_data.into();
         verify::<Fr>(K, input, false);
     }
 
     #[test]
     fn bit_keccak_invalid_padding_mid() {
         // some 1 in padding
-        let mut full_data = generate_padding::<Fr>(123);
+        let mut full_data = KeccakPaddingRow::<Fr>::generate_padding(123);
         full_data.d_bits[KECCAK_RATE - 2] = 1u8;
-        let input = from_full_padding_block(&full_data);
+        let input = full_data.into();
         verify::<Fr>(K, input, false);
     }
 
     #[test]
     fn bit_keccak_invalid_input_len() {
         // wrong len
-        let mut full_data = generate_padding::<Fr>(123);
+        let mut full_data = KeccakPaddingRow::<Fr>::generate_padding(123);
         full_data.d_lens[124] = 124;
-        let input = from_full_padding_block(&full_data);
+        let input = full_data.into();
         verify::<Fr>(K, input, false);
     }
 }
