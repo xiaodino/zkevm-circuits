@@ -97,10 +97,10 @@ mod tests {
             .expect("Cannot parse DEGREE env var as u32");
 
         let params: Option<Params<G1Affine>> = {
-            let params_path = format!(
-                "/home/ubuntu/works/degree/references/data/params-{}",
-                degree
-            );
+            let params_path: String = var("PARAMS_PATH")
+                .unwrap_or(String::from(format!("./params-{}", degree)))
+                .parse()
+                .expect("Cannot parse PARAMS_PATH env var");
             File::open(&params_path)
                 .and_then(|fs| Params::read::<_>(&mut BufReader::new(fs)))
                 .ok()
@@ -119,14 +119,15 @@ mod tests {
             .expect("Cannot parse DEGREE env var as u32");
 
         let params: Option<Params<G1Affine>> = {
-            let params_path = format!(
-                "/home/ubuntu/works/degree/references/data/params-{}",
-                degree
-            );
+            let params_path: String = var("PARAMS_PATH")
+                .unwrap_or(String::from(format!("./params-{}", degree)))
+                .parse()
+                .expect("Cannot parse PARAMS_PATH env var");
             File::open(&params_path)
                 .and_then(|fs| Params::read::<_>(&mut BufReader::new(fs)))
                 .ok()
         };
+
         println!("type2:");
         let empty_circuit = KeccakMultiGadgetPaddingCircuit::<Fr>::default();
         bench_circuit(empty_circuit, params, degree);
@@ -140,10 +141,10 @@ mod tests {
             .expect("Cannot parse DEGREE env var as u32");
 
         let params: Option<Params<G1Affine>> = {
-            let params_path = format!(
-                "/home/ubuntu/works/degree/references/data/params-{}",
-                degree
-            );
+            let params_path: String = var("PARAMS_PATH")
+                .unwrap_or(String::from(format!("./params-{}", degree)))
+                .parse()
+                .expect("Cannot parse PARAMS_PATH env var");
             File::open(&params_path)
                 .and_then(|fs| Params::read::<_>(&mut BufReader::new(fs)))
                 .ok()
@@ -162,10 +163,10 @@ mod tests {
             .expect("Cannot parse DEGREE env var as u32");
 
         let params: Option<Params<G1Affine>> = {
-            let params_path = format!(
-                "/home/ubuntu/works/degree/references/data/params-{}",
-                degree
-            );
+            let params_path: String = var("PARAMS_PATH")
+                .unwrap_or(String::from(format!("./params-{}", degree)))
+                .parse()
+                .expect("Cannot parse PARAMS_PATH env var");
             File::open(&params_path)
                 .and_then(|fs| Params::read::<_>(&mut BufReader::new(fs)))
                 .ok()
