@@ -3,7 +3,7 @@ use eth_types::Field;
 use gadgets::util::{not, select};
 use halo2_proofs::{
     circuit::{Layouter, Region, SimpleFloorPlanner},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Fixed, Selector},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Selector},
     poly::Rotation,
 };
 use std::marker::PhantomData;
@@ -18,9 +18,9 @@ const KECCAK_RATE_IN_BYTES: usize = KECCAK_RATE / 8;
 #[derive(Clone, Debug)]
 pub struct KeccakPaddingConfig<F> {
     q_enable: Selector,
+    q_first: Selector,
+    q_last: Selector,
     q_end: Column<Advice>,
-    is_first_row: Column<Fixed>,
-    is_last_row: Column<Fixed>,
     curr_padding_sum: Column<Advice>,
     d_bits: [Column<Advice>; KECCAK_REGION_WIDTH],
     d_lens: [Column<Advice>; KECCAK_REGION_WIDTH / 8],
@@ -89,8 +89,8 @@ impl<F: Field> KeccakPaddingConfig<F> {
     pub(crate) fn configure(meta: &mut ConstraintSystem<F>) -> Self {
         let q_enable = meta.selector();
         let q_end = meta.advice_column();
-        let is_first_row = meta.fixed_column();
-        let is_last_row = meta.fixed_column();
+        let q_first = meta.selector();
+        let q_last = meta.selector();
         let curr_padding_sum = meta.advice_column();
         let d_bits = [(); KECCAK_REGION_WIDTH].map(|_| meta.advice_column());
         let d_lens = [(); KECCAK_REGION_WIDTH_IN_BYTES].map(|_| meta.advice_column());
@@ -102,22 +102,16 @@ impl<F: Field> KeccakPaddingConfig<F> {
             let mut cb = BaseConstraintBuilder::new(5);
 
             // len & rlc are passed down by previous circuit, they are not necessarily 0.
-            let is_first = meta.query_fixed(is_first_row, Rotation::cur());
+            cb.require_zero(
+                "row [-1] prev_s_flag == 0",
+                meta.query_advice(s_flags[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation::prev()),
+            );
+            cb.require_zero(
+                "row [-1] prev_padding_sum == 0",
+                meta.query_advice(curr_padding_sum, Rotation::prev()),
+            );
 
-            cb.condition(is_first.clone(), |cb| {
-                cb.require_zero(
-                    "prev_s_flag == 0",
-                    meta.query_advice(s_flags[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation::prev()),
-                );
-            });
-            cb.condition(is_first.clone(), |cb| {
-                cb.require_zero(
-                    "prev_padding_sum == 0",
-                    meta.query_advice(curr_padding_sum, Rotation::prev()),
-                );
-            });
-
-            cb.gate(meta.query_selector(q_enable))
+            cb.gate(meta.query_selector(q_first))
         });
 
         meta.create_gate("boolean checks", |meta| {
@@ -141,16 +135,10 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 cb.require_boolean("boolean state switch", s_i - s_i_prev);
             }
 
-            let is_first = meta.query_fixed(is_first_row, Rotation::cur());
-            cb.require_boolean("boolean first flag", is_first);
-
-            let is_last = meta.query_fixed(is_last_row, Rotation::cur());
-            cb.require_boolean("boolean first flag", is_last);
-
             cb.gate(meta.query_selector(q_enable))
         });
 
-        meta.create_gate("start/end padding bit check", |meta| {
+        meta.create_gate("start padding bit check", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
 
             let s_0 = meta.query_advice(s_flags[0], Rotation::cur());
@@ -175,17 +163,21 @@ impl<F: Field> KeccakPaddingConfig<F> {
                     cb.require_equal("start with 1 inside row", d_bit_0, 1u64.expr());
                 });
             }
+            cb.gate(meta.query_selector(q_enable))
+        });
 
-            let is_last = meta.query_fixed(is_last_row, Rotation::cur());
+        meta.create_gate("last row end padding bit check", |meta| {
+            let mut cb = BaseConstraintBuilder::new(5);
+
             let s_last = meta.query_advice(s_flags[s_flags.len() - 1], Rotation::cur());
             let d_last = meta.query_advice(d_bits[d_bits.len() - 1], Rotation::cur());
 
-            let s_padding_end = s_last * is_last;
+            let s_padding_end = s_last;
             cb.condition(s_padding_end, |cb| {
                 cb.require_equal("end with 1", d_last, 1u64.expr())
             });
 
-            cb.gate(meta.query_selector(q_enable))
+            cb.gate(meta.query_selector(q_last))
         });
 
         meta.create_gate("sum padding", |meta| {
@@ -203,20 +195,23 @@ impl<F: Field> KeccakPaddingConfig<F> {
                     .fold(sum_padding_bits, |sum, b| sum + s_i.clone() * b);
             }
 
-            let last_row = meta.query_fixed(is_last_row, Rotation::cur());
             cb.require_equal(
                 "sum(padding_bits) == curr_padding_sum",
                 sum_padding_bits,
                 curr_padding_sum.clone(),
             );
-            cb.condition(last_row, |cb| {
-                cb.require_equal(
-                    "sum(padding_bits) == 2",
-                    2u64.expr(),
-                    curr_padding_sum.clone(),
-                )
-            });
             cb.gate(meta.query_selector(q_enable))
+        });
+
+        meta.create_gate("sum padding block bits == 2", |meta| {
+            let mut cb = BaseConstraintBuilder::new(5);
+            let curr_padding_sum = meta.query_advice(curr_padding_sum, Rotation::cur());
+            cb.require_equal(
+                "sum(padding_bits) == 2",
+                2u64.expr(),
+                curr_padding_sum.clone(),
+            );
+            cb.gate(meta.query_selector(q_last))
         });
 
         meta.create_gate("input len check", |meta| {
@@ -299,24 +294,20 @@ impl<F: Field> KeccakPaddingConfig<F> {
             cb.gate(meta.query_selector(q_enable))
         });
 
-        meta.create_gate("input ending check", |meta| {
+        meta.create_gate("last row input ending check", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
 
             let s_last = meta.query_advice(s_flags[s_flags.len() - 1], Rotation::cur());
             let q_end = meta.query_advice(q_end, Rotation::cur());
-
-            let last_row = meta.query_fixed(is_last_row, Rotation::cur());
-            cb.condition(last_row, |cb| {
-                cb.require_equal("s_last == q_end", s_last, q_end);
-            });
-            cb.gate(meta.query_selector(q_enable))
+            cb.require_equal("s_last == q_end", s_last, q_end);
+            cb.gate(meta.query_selector(q_last))
         });
 
         KeccakPaddingConfig {
             q_enable,
+            q_first,
+            q_last,
             q_end,
-            is_first_row,
-            is_last_row,
             curr_padding_sum,
             d_bits,
             d_lens,
@@ -401,6 +392,12 @@ impl<F: Field> KeccakPaddingConfig<F> {
             let enabled_region_offset = offset + 1 + i;
             self.q_enable.enable(region, enabled_region_offset)?;
 
+            if i == 0 {
+                self.q_first.enable(region, enabled_region_offset)?;
+            } else if i == KECCAK_REGION_HEIGHT as usize - 1 {
+                self.q_last.enable(region, enabled_region_offset)?;
+            }
+
             // Input bits w/ padding
             let row_data = &data_block.block_rows[i];
             let d_bits = row_data.d_bits;
@@ -443,20 +440,6 @@ impl<F: Field> KeccakPaddingConfig<F> {
                     || Ok(*d_rlc),
                 )?;
             }
-
-            region.assign_fixed(
-                || format!("assign fixed first flag {}", offset),
-                self.is_first_row,
-                enabled_region_offset,
-                || Ok(F::from((i == 0) as u64)),
-            )?;
-
-            region.assign_fixed(
-                || format!("assign fixed first flag {}", offset),
-                self.is_last_row,
-                enabled_region_offset,
-                || Ok(F::from((i + 1 == KECCAK_REGION_HEIGHT as usize) as u64)),
-            )?;
 
             // output the curr len,rlc,s_flag & padding
             region.assign_advice(
