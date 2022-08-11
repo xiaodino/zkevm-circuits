@@ -17,9 +17,9 @@ use itertools::Itertools;
 use keccak256::keccak_arith::Keccak;
 use std::{env::var, marker::PhantomData, vec};
 
-const KECCAK_WIDTH: usize = 5 * 5 * 64;
-const ABSORB_WIDTH_PER_ROW: usize = 64;
-const C_WIDTH: usize = 5 * 64;
+pub(crate) const KECCAK_WIDTH: usize = 5 * 5 * 64;
+pub(crate) const ABSORB_WIDTH_PER_ROW: usize = 64;
+pub(crate) const C_WIDTH: usize = 5 * 64;
 const RHOM: [[usize; 5]; 5] = [
     [0, 36, 3, 41, 18],
     [1, 44, 10, 45, 2],
@@ -75,12 +75,13 @@ fn get_num_bits_per_theta_lookup() -> usize {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct KeccakRow<F> {
-    s_bits: [u8; KECCAK_WIDTH],
-    c_bits: [u8; C_WIDTH],
-    a_bits: [u8; ABSORB_WIDTH_PER_ROW],
-    q_end: u64,
-    hash_rlc: F,
+pub(crate) struct KeccakRow<F> {
+    pub(crate) s_bits: [u8; KECCAK_WIDTH],
+    pub(crate) c_bits: [u8; C_WIDTH],
+    pub(crate) a_bits: [u8; ABSORB_WIDTH_PER_ROW],
+    pub(crate) q_end: u64,
+    pub(crate) hash_rlc: F,
+    pub(crate) acc_len: u64,
 }
 
 /// KeccakBitConfig
@@ -417,7 +418,7 @@ impl<F: Field> KeccakBitConfig<F> {
         }
     }
 
-    fn assign(
+    pub(crate) fn assign(
         &self,
         mut layouter: impl Layouter<F>,
         _size: usize,
@@ -443,7 +444,7 @@ impl<F: Field> KeccakBitConfig<F> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn set_row(
+    pub(crate) fn set_row(
         &self,
         region: &mut Region<'_, F>,
         offset: usize,
@@ -591,7 +592,7 @@ fn keccak_reference<F: Field>(msg: &[u8], r: F) -> F {
     RandomLinearCombination::<F, 32>::random_linear_combine(keccak.digest().try_into().unwrap(), r)
 }
 
-fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: F) {
+pub(crate) fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: F) {
     let mut bits = into_bits(&bytes);
     let rate: usize = 136 * 8;
 
@@ -608,6 +609,7 @@ fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: F) {
 
     let chunks = bits.chunks(rate);
     let num_chunks = chunks.len();
+    let mut acc_lens = 0u64;
     for (idx, chunk) in chunks.enumerate() {
         // Absorb
         let mut counter = 0;
@@ -619,6 +621,7 @@ fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: F) {
         }
 
         let mut counter = 0;
+        let mut acc_row_lens = 0u64;
         for (round, round_cst) in IOTA_ROUND_CST.iter().enumerate() {
             let mut a_bits = [0u8; 64];
             if counter < rate {
@@ -626,6 +629,7 @@ fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: F) {
                     *a_bit = chunk[counter];
                     counter += 1;
                 }
+                acc_row_lens = counter as u64 / 8;
             }
 
             let mut c = [[0u8; 64]; 5];
@@ -690,6 +694,7 @@ fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: F) {
                 a_bits,
                 q_end: q_end as u64,
                 hash_rlc,
+                acc_len: acc_lens + acc_row_lens,
             });
 
             if round < 24 {
@@ -731,6 +736,8 @@ fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: F) {
                 }
             }
         }
+
+        acc_lens = acc_row_lens;
     }
 
     let hash_bytes = b
@@ -743,7 +750,7 @@ fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: F) {
     println!("ref RLC: {:x?}", keccak_reference(&bytes, r));
 }
 
-fn multi_keccak<F: Field>(bytes: Vec<Vec<u8>>, r: F) -> Vec<KeccakRow<F>> {
+pub(crate) fn multi_keccak<F: Field>(bytes: Vec<Vec<u8>>, r: F) -> Vec<KeccakRow<F>> {
     // Dummy first row so that the initial data is absorbed
     // The initial data doesn't really matter, `q_end` just needs to be enabled.
     let mut rows: Vec<KeccakRow<F>> = vec![KeccakRow {
@@ -752,6 +759,7 @@ fn multi_keccak<F: Field>(bytes: Vec<Vec<u8>>, r: F) -> Vec<KeccakRow<F>> {
         a_bits: [0u8; ABSORB_WIDTH_PER_ROW],
         q_end: 1u64,
         hash_rlc: F::zero(),
+        acc_len: 0u64,
     }];
     // Actual keccaks
     for bytes in bytes {
@@ -857,11 +865,11 @@ mod tests {
         let r = KeccakBitCircuit::r();
         let inputs = multi_keccak(
             vec![
-                vec![],
-                (0u8..1).collect::<Vec<_>>(),
-                (0u8..135).collect::<Vec<_>>(),
-                (0u8..136).collect::<Vec<_>>(),
-                (0u8..200).collect::<Vec<_>>(),
+                // vec![],
+                (1u8..2).collect::<Vec<_>>(),
+                /* (0u8..135).collect::<Vec<_>>(),
+                 * (0u8..136).collect::<Vec<_>>(),
+                 * (0u8..200).collect::<Vec<_>>(), */
             ],
             r,
         );

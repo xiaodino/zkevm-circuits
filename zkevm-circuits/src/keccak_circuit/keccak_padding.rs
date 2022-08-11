@@ -28,19 +28,19 @@ pub struct KeccakPaddingConfig<F> {
 
 pub(crate) struct KeccakPaddingRow<F: Field> {
     pub(crate) q_end: u64,
-    pub(crate) acc_len: u32,
+    pub(crate) acc_len: u64,
     pub(crate) acc_rlc: F,
     pub(crate) d_bits: [u8; KECCAK_WIDTH],
-    pub(crate) d_lens: [u32; KECCAK_RATE_IN_BYTES],
+    pub(crate) d_lens: [u64; KECCAK_RATE_IN_BYTES],
     pub(crate) d_rlcs: [F; KECCAK_RATE_IN_BYTES],
     pub(crate) s_flags: [bool; KECCAK_RATE_IN_BYTES],
     pub(crate) randomness: F,
 }
 
 impl<F: Field> KeccakPaddingRow<F> {
-    pub(crate) fn generate_padding(data_len: u32) -> KeccakPaddingRow<F> {
-        let data_len_offset = data_len % KECCAK_RATE_IN_BYTES as u32;
-        let data_len_base = (data_len / KECCAK_RATE_IN_BYTES as u32) * KECCAK_RATE_IN_BYTES as u32;
+    pub(crate) fn generate_padding(data_len: u64) -> KeccakPaddingRow<F> {
+        let data_len_offset = data_len % KECCAK_RATE_IN_BYTES as u64;
+        let data_len_base = (data_len / KECCAK_RATE_IN_BYTES as u64) * KECCAK_RATE_IN_BYTES as u64;
 
         let mut output = KeccakPaddingRow::<F> {
             q_end: 1u64,
@@ -53,8 +53,8 @@ impl<F: Field> KeccakPaddingRow<F> {
             randomness: KeccakPaddingCircuit::r(),
         };
 
-        output.s_flags[0] = data_len_offset == 0u32;
-        output.d_lens[0] = data_len_base + !output.s_flags[0] as u32;
+        output.s_flags[0] = data_len_offset == 0u64;
+        output.d_lens[0] = data_len_base + !output.s_flags[0] as u64;
         output.d_rlcs[0] = if output.s_flags[0] {
             output.acc_rlc
         } else {
@@ -69,13 +69,13 @@ impl<F: Field> KeccakPaddingRow<F> {
 
         for i in 1 as usize..KECCAK_RATE_IN_BYTES {
             output.s_flags[i] = {
-                if (i as u32) < data_len_offset {
+                if (i as u64) < data_len_offset {
                     false
                 } else {
                     true
                 }
             };
-            output.d_lens[i] = output.d_lens[i - 1] + !output.s_flags[i] as u32;
+            output.d_lens[i] = output.d_lens[i - 1] + !output.s_flags[i] as u64;
             output.d_rlcs[i] = if output.s_flags[i] {
                 output.d_rlcs[i - 1]
             } else {
@@ -298,13 +298,13 @@ impl<F: Field> KeccakPaddingConfig<F> {
         )
     }
 
-    fn set_row(
+    pub(crate) fn set_row(
         &self,
         region: &mut Region<'_, F>,
         offset: usize,
         q_end: u64,
         d_bits: [u8; KECCAK_WIDTH],
-        d_lens: [u32; KECCAK_RATE_IN_BYTES],
+        d_lens: [u64; KECCAK_RATE_IN_BYTES],
         d_rlcs: [F; KECCAK_RATE_IN_BYTES],
         s_flags: [bool; KECCAK_RATE_IN_BYTES],
         randomness: F,
@@ -394,7 +394,7 @@ pub(crate) mod tests {
         assert_eq!(err.is_ok(), success);
     }
 
-    pub(crate) fn generate_padding<F: Field>(data_len: u32) -> KeccakPaddingRow<F> {
+    pub(crate) fn generate_padding<F: Field>(data_len: u64) -> KeccakPaddingRow<F> {
         KeccakPaddingRow::generate_padding(data_len)
     }
 

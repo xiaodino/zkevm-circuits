@@ -55,17 +55,17 @@ pub struct KeccakMultiGadgetPaddingConfig<F> {
 
 pub(crate) struct KeccakPaddingSubRow<F: Field> {
     pub(crate) q_end: u64,
-    prev_len: u32,
+    prev_len: u64,
     prev_rlc: F,
     prev_s_flag: bool,
     prev_padding_sum: u32,
-    curr_len: u32,
+    curr_len: u64,
     curr_rlc: F,
     curr_s_flag: bool,
     curr_padding_sum: u32,
     randomness: F,
     pub(crate) d_bits: [u8; KECCAK_DATA_REGION_WIDTH],
-    pub(crate) d_lens: [u32; KECCAK_DATA_REGION_WIDTH / 8],
+    pub(crate) d_lens: [u64; KECCAK_DATA_REGION_WIDTH / 8],
     pub(crate) d_rlcs: [F; KECCAK_DATA_REGION_WIDTH / 8],
     pub(crate) s_flags: [bool; KECCAK_DATA_REGION_WIDTH / 8],
 }
@@ -546,7 +546,7 @@ impl<F: Field> KeccakMultiGadgetPaddingCircuit<F> {
         F::from(123456)
     }
 
-    fn generate_padding_sub_rows(data_len: u32) -> Vec<KeccakPaddingSubRow<F>> {
+    fn generate_padding_sub_rows(data_len: u64) -> Vec<KeccakPaddingSubRow<F>> {
         let keccak_padding = KeccakPaddingRow::generate_padding(data_len);
 
         let mut out = Vec::<KeccakPaddingSubRow<F>>::new();
@@ -564,7 +564,7 @@ impl<F: Field> KeccakMultiGadgetPaddingCircuit<F> {
 
             curr_len = keccak_padding.s_flags[i * 8..(i + 1) * 8]
                 .iter()
-                .fold(prev_len, |sum, v| sum + (!v as u32));
+                .fold(prev_len, |sum, v| sum + (!v as u64));
             curr_rlc = keccak_padding.d_bits[i * 64..(i + 1) * 64]
                 .chunks(8)
                 .map(|bits| bits.iter().rev().fold(0, |byte, bit| byte * 2 + bit))
@@ -841,7 +841,7 @@ mod tests {
         assert_eq!(err.is_ok(), success);
     }
 
-    fn generate_padding_sub_rows<F: Field>(data_len: u32) -> Vec<KeccakPaddingSubRow<F>> {
+    fn generate_padding_sub_rows<F: Field>(data_len: u64) -> Vec<KeccakPaddingSubRow<F>> {
         KeccakMultiGadgetPaddingCircuit::generate_padding_sub_rows(data_len)
     }
 

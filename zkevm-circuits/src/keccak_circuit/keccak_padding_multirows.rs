@@ -249,7 +249,7 @@ impl<F: Field> KeccakMultiRowPaddingConfig<F> {
         offset: usize,
         q_end: u64,
         d_bits: [u8; KECCAK_WIDTH],
-        d_lens: [u32; KECCAK_RATE_IN_BYTES],
+        d_lens: [u64; KECCAK_RATE_IN_BYTES],
         d_rlcs: [F; KECCAK_RATE_IN_BYTES],
         s_flags: [bool; KECCAK_RATE_IN_BYTES],
         randomness: F,

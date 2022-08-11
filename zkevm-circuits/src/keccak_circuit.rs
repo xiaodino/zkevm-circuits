@@ -23,3 +23,6 @@ pub mod keccak_padding_multi_gadgets;
 
 /// Keccak util for cell arrangement
 pub mod keccak_utils;
+
+/// Keccak full functionaility with padding bit version
+pub mod keccak_complete_bit;

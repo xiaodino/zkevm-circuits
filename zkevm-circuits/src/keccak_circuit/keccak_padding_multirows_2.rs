@@ -10,6 +10,8 @@ use std::marker::PhantomData;
 
 use crate::keccak_circuit::keccak_padding::KeccakPaddingRow;
 
+use super::keccak_bit::KeccakRow;
+
 const KECCAK_REGION_WIDTH: usize = 64;
 const KECCAK_REGION_WIDTH_IN_BYTES: usize = KECCAK_REGION_WIDTH / 8;
 const KECCAK_REGION_HEIGHT: u64 = 17;
@@ -34,10 +36,10 @@ pub struct KeccakPaddingConfig<F> {
 }
 
 #[derive(Debug)]
-pub(crate) struct KeccakPaddingBlock<F: Field> {
+pub(crate) struct KeccakPaddingBlock<F> {
     pub(crate) q_end: u64,
     pub(crate) acc_rlc: F,
-    pub(crate) acc_len: u32,
+    pub(crate) acc_len: u64,
     pub(crate) block_rows: [KeccakPaddingBlockRow<F>; KECCAK_REGION_HEIGHT as usize],
 }
 
@@ -83,17 +85,125 @@ impl<F: Field> From<KeccakPaddingRow<F>> for KeccakPaddingBlock<F> {
     }
 }
 
+impl<F: Field> From<&[KeccakRow<F>]> for KeccakPaddingBlock<F> {
+    fn from(keccak_complete_rows: &[KeccakRow<F>]) -> Self {
+        // take the last 17 rows which should be the padding part.
+        assert!(keccak_complete_rows.len() >= 17);
+        let padding_block_rows = keccak_complete_rows
+            [keccak_complete_rows.len() - KECCAK_REGION_HEIGHT as usize..]
+            .to_vec();
+
+        let init_len = keccak_complete_rows
+            .get(keccak_complete_rows.len() - KECCAK_REGION_HEIGHT as usize)
+            .map_or_else(|| 0, |row| row.acc_len);
+        let init_rlc = keccak_complete_rows
+            .get(keccak_complete_rows.len() - KECCAK_REGION_HEIGHT as usize)
+            .map_or_else(|| F::zero(), |row| row.hash_rlc);
+
+        let mut rows = Vec::<KeccakPaddingBlockRow<F>>::new();
+        let mut curr_padding_sum = 0;
+        let mut acc_len = init_len;
+        let mut acc_rlc = init_rlc;
+        let randomness = KeccakPaddingMultiRowsExCircuit::<F>::r();
+        for row in padding_block_rows {
+            let s_flags = [false; KECCAK_REGION_WIDTH_IN_BYTES];
+
+            if row.acc_len < acc_len + KECCAK_REGION_WIDTH_IN_BYTES as u64 {
+                // padding starts this row
+                let is_paddings: Vec<bool> = s_flags
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| acc_len + i as u64 > row.acc_len)
+                    .collect();
+
+                curr_padding_sum = row
+                    .a_bits
+                    .chunks(8)
+                    .zip(is_paddings.iter())
+                    .map(|(bits, is_padding)| {
+                        bits.iter().fold(curr_padding_sum, |sum, bit| {
+                            sum + *bit as u32 * *is_padding as u32
+                        })
+                    })
+                    .sum();
+                let sub_row = KeccakPaddingBlockRow::<F> {
+                    curr_padding_sum: curr_padding_sum,
+                    d_bits: row.a_bits,
+                    d_lens: [0; KECCAK_REGION_WIDTH_IN_BYTES]
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| row.acc_len + i as u64)
+                        .collect::<Vec<u64>>()
+                        .try_into()
+                        .unwrap(),
+                    d_rlcs: row
+                        .a_bits
+                        .chunks(8)
+                        .map(|bits| bits.iter().rev().fold(0, |byte, bit| byte * 2 + bit))
+                        .zip(is_paddings.iter())
+                        .map(|(byte, is_padding)| {
+                            if !*is_padding {
+                                acc_rlc = acc_rlc * randomness + F::from(byte as u64);
+                            }
+                            acc_rlc
+                        })
+                        .collect::<Vec<F>>()
+                        .try_into()
+                        .unwrap(),
+                    s_flags: is_paddings.try_into().unwrap(),
+                };
+                rows.push(sub_row);
+            } else {
+                // normal data
+                let sub_row = KeccakPaddingBlockRow::<F> {
+                    curr_padding_sum: 0,
+                    d_bits: row.a_bits.clone(),
+                    d_lens: [0; KECCAK_REGION_WIDTH_IN_BYTES]
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| row.acc_len + i as u64)
+                        .collect::<Vec<u64>>()
+                        .try_into()
+                        .unwrap(),
+                    d_rlcs: row
+                        .a_bits
+                        .as_slice()
+                        .chunks(8)
+                        .map(|bits| bits.iter().rev().fold(0, |byte, bit| byte * 2 + bit))
+                        .map(|byte| {
+                            acc_rlc = acc_rlc * randomness + F::from(byte as u64);
+                            acc_rlc
+                        })
+                        .collect::<Vec<F>>()
+                        .try_into()
+                        .unwrap(),
+                    s_flags: s_flags,
+                };
+                acc_len += KECCAK_REGION_HEIGHT;
+                rows.push(sub_row);
+            }
+        }
+
+        KeccakPaddingBlock::<F> {
+            q_end: 1u64,
+            acc_len: init_len,
+            acc_rlc: init_rlc,
+            block_rows: rows.try_into().unwrap(),
+        }
+    }
+}
+
 #[derive(Debug)]
-pub(crate) struct KeccakPaddingBlockRow<F: Field> {
+pub(crate) struct KeccakPaddingBlockRow<F> {
     pub(crate) curr_padding_sum: u32,
     pub(crate) d_bits: [u8; KECCAK_REGION_WIDTH],
-    pub(crate) d_lens: [u32; KECCAK_REGION_WIDTH_IN_BYTES],
+    pub(crate) d_lens: [u64; KECCAK_REGION_WIDTH_IN_BYTES],
     pub(crate) d_rlcs: [F; KECCAK_REGION_WIDTH_IN_BYTES],
     pub(crate) s_flags: [bool; KECCAK_REGION_WIDTH_IN_BYTES],
 }
 
 /// KeccakPaddingMultiRowsExCircuit
-pub struct KeccakPaddingMultiRowsExCircuit<F: Field> {
+pub struct KeccakPaddingMultiRowsExCircuit<F> {
     inputs: Vec<KeccakPaddingBlock<F>>,
     size: usize,
     _marker: PhantomData<F>,
@@ -388,7 +498,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
         )
     }
 
-    fn set_region(
+    pub(crate) fn set_region(
         &self,
         region: &mut Region<'_, F>,
         offset: usize,
