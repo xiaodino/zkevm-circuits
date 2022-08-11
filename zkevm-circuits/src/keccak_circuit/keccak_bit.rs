@@ -81,7 +81,8 @@ pub(crate) struct KeccakRow<F> {
     pub(crate) a_bits: [u8; ABSORB_WIDTH_PER_ROW],
     pub(crate) q_end: u64,
     pub(crate) hash_rlc: F,
-    pub(crate) acc_len: u64,
+    pub(crate) input_len: u64,
+    pub(crate) input_rlc: F,
 }
 
 /// KeccakBitConfig
@@ -594,6 +595,7 @@ fn keccak_reference<F: Field>(msg: &[u8], r: F) -> F {
 
 pub(crate) fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: F) {
     let mut bits = into_bits(&bytes);
+
     let rate: usize = 136 * 8;
 
     let mut b = [[[0u8; 64]; 5]; 5];
@@ -609,7 +611,8 @@ pub(crate) fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: 
 
     let chunks = bits.chunks(rate);
     let num_chunks = chunks.len();
-    let mut acc_lens = 0u64;
+    let mut acc_len = 0u64;
+    let mut acc_rlc = F::zero();
     for (idx, chunk) in chunks.enumerate() {
         // Absorb
         let mut counter = 0;
@@ -621,7 +624,6 @@ pub(crate) fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: 
         }
 
         let mut counter = 0;
-        let mut acc_row_lens = 0u64;
         for (round, round_cst) in IOTA_ROUND_CST.iter().enumerate() {
             let mut a_bits = [0u8; 64];
             if counter < rate {
@@ -629,7 +631,27 @@ pub(crate) fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: 
                     *a_bit = chunk[counter];
                     counter += 1;
                 }
-                acc_row_lens = counter as u64 / 8;
+
+                let input_bytes = to_bytes(&a_bits);
+                let is_inputs = (0..input_bytes.len())
+                    .map(|i| (acc_len as usize + i < bytes.len()) as bool)
+                    .collect::<Vec<bool>>();
+                acc_rlc = input_bytes
+                    .iter()
+                    .zip(is_inputs)
+                    .fold(acc_rlc, |rlc, (v, is_input)| {
+                        if is_input {
+                            rlc * r + F::from(*v as u64)
+                        } else {
+                            rlc
+                        }
+                    });
+
+                acc_len = if acc_len as usize + 8 <= bytes.len() {
+                    acc_len + 8
+                } else {
+                    bytes.len() as u64
+                };
             }
 
             let mut c = [[0u8; 64]; 5];
@@ -694,7 +716,8 @@ pub(crate) fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: 
                 a_bits,
                 q_end: q_end as u64,
                 hash_rlc,
-                acc_len: acc_lens + acc_row_lens,
+                input_len: acc_len,
+                input_rlc: acc_rlc,
             });
 
             if round < 24 {
@@ -736,8 +759,6 @@ pub(crate) fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: Vec<u8>, r: 
                 }
             }
         }
-
-        acc_lens = acc_row_lens;
     }
 
     let hash_bytes = b
@@ -759,7 +780,8 @@ pub(crate) fn multi_keccak<F: Field>(bytes: Vec<Vec<u8>>, r: F) -> Vec<KeccakRow
         a_bits: [0u8; ABSORB_WIDTH_PER_ROW],
         q_end: 1u64,
         hash_rlc: F::zero(),
-        acc_len: 0u64,
+        input_len: 0u64,
+        input_rlc: F::zero(),
     }];
     // Actual keccaks
     for bytes in bytes {

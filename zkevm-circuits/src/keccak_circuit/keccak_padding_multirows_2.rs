@@ -87,18 +87,19 @@ impl<F: Field> From<KeccakPaddingRow<F>> for KeccakPaddingBlock<F> {
 
 impl<F: Field> From<&[KeccakRow<F>]> for KeccakPaddingBlock<F> {
     fn from(keccak_complete_rows: &[KeccakRow<F>]) -> Self {
-        // take the last 17 rows which should be the padding part.
-        assert!(keccak_complete_rows.len() >= 17);
+        // take the first 17 of the last 25 rows which should be the padding part.
+        assert!(keccak_complete_rows.len() >= 25);
+        let padding_row_idx = keccak_complete_rows.len() - 25 as usize;
         let padding_block_rows = keccak_complete_rows
-            [keccak_complete_rows.len() - KECCAK_REGION_HEIGHT as usize..]
+            [padding_row_idx..padding_row_idx + KECCAK_REGION_HEIGHT as usize]
             .to_vec();
 
         let init_len = keccak_complete_rows
-            .get(keccak_complete_rows.len() - KECCAK_REGION_HEIGHT as usize)
-            .map_or_else(|| 0, |row| row.acc_len);
+            .get(padding_row_idx - 1)
+            .map_or_else(|| 0, |row| row.input_len);
         let init_rlc = keccak_complete_rows
-            .get(keccak_complete_rows.len() - KECCAK_REGION_HEIGHT as usize)
-            .map_or_else(|| F::zero(), |row| row.hash_rlc);
+            .get(padding_row_idx - 1)
+            .map_or_else(|| F::zero(), |row| row.input_rlc);
 
         let mut rows = Vec::<KeccakPaddingBlockRow<F>>::new();
         let mut curr_padding_sum = 0;
@@ -108,31 +109,34 @@ impl<F: Field> From<&[KeccakRow<F>]> for KeccakPaddingBlock<F> {
         for row in padding_block_rows {
             let s_flags = [false; KECCAK_REGION_WIDTH_IN_BYTES];
 
-            if row.acc_len < acc_len + KECCAK_REGION_WIDTH_IN_BYTES as u64 {
+            if row.input_len < acc_len + KECCAK_REGION_WIDTH_IN_BYTES as u64 {
                 // padding starts this row
                 let is_paddings: Vec<bool> = s_flags
                     .iter()
                     .enumerate()
-                    .map(|(i, _)| acc_len + i as u64 > row.acc_len)
+                    .map(|(i, _)| acc_len + i as u64 >= row.input_len)
                     .collect();
 
-                curr_padding_sum = row
+                curr_padding_sum += row
                     .a_bits
                     .chunks(8)
                     .zip(is_paddings.iter())
                     .map(|(bits, is_padding)| {
-                        bits.iter().fold(curr_padding_sum, |sum, bit| {
-                            sum + *bit as u32 * *is_padding as u32
-                        })
+                        bits.iter()
+                            .fold(0, |sum, bit| sum + *bit as u32 * *is_padding as u32)
                     })
-                    .sum();
+                    .sum::<u32>();
+
                 let sub_row = KeccakPaddingBlockRow::<F> {
                     curr_padding_sum: curr_padding_sum,
                     d_bits: row.a_bits,
                     d_lens: [0; KECCAK_REGION_WIDTH_IN_BYTES]
                         .iter()
                         .enumerate()
-                        .map(|(i, _)| row.acc_len + i as u64)
+                        .map(|(i, _)| {
+                            acc_len += 1u64 * !is_paddings[i] as u64;
+                            acc_len
+                        })
                         .collect::<Vec<u64>>()
                         .try_into()
                         .unwrap(),
@@ -160,8 +164,10 @@ impl<F: Field> From<&[KeccakRow<F>]> for KeccakPaddingBlock<F> {
                     d_bits: row.a_bits.clone(),
                     d_lens: [0; KECCAK_REGION_WIDTH_IN_BYTES]
                         .iter()
-                        .enumerate()
-                        .map(|(i, _)| row.acc_len + i as u64)
+                        .map(|_| {
+                            acc_len += 1u64;
+                            acc_len
+                        })
                         .collect::<Vec<u64>>()
                         .try_into()
                         .unwrap(),
@@ -179,7 +185,6 @@ impl<F: Field> From<&[KeccakRow<F>]> for KeccakPaddingBlock<F> {
                         .unwrap(),
                     s_flags: s_flags,
                 };
-                acc_len += KECCAK_REGION_HEIGHT;
                 rows.push(sub_row);
             }
         }
@@ -422,6 +427,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 meta.query_advice(d_rlcs[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation::prev());
             let input_byte_0 = d_bits[0..8]
                 .iter()
+                .rev()
                 .map(|bit| meta.query_advice(*bit, Rotation::cur()))
                 .fold(0u64.expr(), |v, b| v * 2u64.expr() + b);
             cb.require_equal(
