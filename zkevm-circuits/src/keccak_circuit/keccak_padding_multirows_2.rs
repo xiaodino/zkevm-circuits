@@ -24,7 +24,7 @@ pub struct KeccakPaddingConfig<F> {
     q_enable: Selector,
     q_first: Selector,
     q_last: Selector,
-    q_end: Column<Advice>,
+    // q_end: Column<Advice>,
     curr_padding_sum: Column<Advice>,
     d_bits: [Column<Advice>; KECCAK_REGION_WIDTH],
     d_lens: [Column<Advice>; KECCAK_REGION_WIDTH / 8],
@@ -260,7 +260,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
         allocated_d_bits: Option<[Column<Advice>; KECCAK_REGION_WIDTH]>,
     ) -> Self {
         let q_enable = meta.selector();
-        let q_end = meta.advice_column();
+        // let q_end = meta.advice_column();
         let q_first = meta.selector();
         let q_last = meta.selector();
         let curr_padding_sum = meta.advice_column();
@@ -470,20 +470,20 @@ impl<F: Field> KeccakPaddingConfig<F> {
             cb.gate(meta.query_selector(q_enable))
         });
 
-        meta.create_gate("last row input ending check", |meta| {
-            let mut cb = BaseConstraintBuilder::new(5);
+        // meta.create_gate("last row input ending check", |meta| {
+        //     let mut cb = BaseConstraintBuilder::new(5);
 
-            let s_last = meta.query_advice(s_flags[s_flags.len() - 1], Rotation::cur());
-            let q_end = meta.query_advice(q_end, Rotation::cur());
-            cb.require_equal("s_last == q_end", s_last, q_end);
-            cb.gate(meta.query_selector(q_last))
-        });
+        //     let s_last = meta.query_advice(s_flags[s_flags.len() - 1],
+        // Rotation::cur());     let q_end = meta.query_advice(q_end,
+        // Rotation::cur());     cb.require_equal("s_last == q_end", s_last,
+        // q_end);     cb.gate(meta.query_selector(q_last))
+        // });
 
         KeccakPaddingConfig {
             q_enable,
             q_first,
             q_last,
-            q_end,
+            // q_end,
             curr_padding_sum,
             d_bits,
             d_lens,
@@ -632,12 +632,12 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 || Ok(F::from(randomness)),
             )?;
 
-            region.assign_advice(
-                || format!("assign q_end{}", offset),
-                self.q_end,
-                enabled_region_offset,
-                || Ok(F::from(data_block.q_end)),
-            )?;
+            // region.assign_advice(
+            //     || format!("assign q_end{}", offset),
+            //     self.q_end,
+            //     enabled_region_offset,
+            //     || Ok(F::from(data_block.q_end)),
+            // )?;
         }
 
         Ok(())
