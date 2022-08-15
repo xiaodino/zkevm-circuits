@@ -25,4 +25,4 @@ pub mod keccak_padding_multi_gadgets;
 pub mod keccak_utils;
 
 /// Keccak full functionaility with padding bit version
-pub mod keccak_complete_bit;
+pub mod keccak_complete_bit_2;

@@ -240,7 +240,7 @@ impl<F: Field> Circuit<F> for KeccakPaddingMultiRowsExCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        KeccakPaddingConfig::configure(meta)
+        KeccakPaddingConfig::configure(meta, None)
     }
 
     fn synthesize(&self, config: Self::Config, layouter: impl Layouter<F>) -> Result<(), Error> {
@@ -255,13 +255,19 @@ impl<F: Field> Circuit<F> for KeccakPaddingMultiRowsExCircuit<F> {
 }
 
 impl<F: Field> KeccakPaddingConfig<F> {
-    pub(crate) fn configure(meta: &mut ConstraintSystem<F>) -> Self {
+    pub(crate) fn configure(
+        meta: &mut ConstraintSystem<F>,
+        allocated_d_bits: Option<[Column<Advice>; KECCAK_REGION_WIDTH]>,
+    ) -> Self {
         let q_enable = meta.selector();
         let q_end = meta.advice_column();
         let q_first = meta.selector();
         let q_last = meta.selector();
         let curr_padding_sum = meta.advice_column();
-        let d_bits = [(); KECCAK_REGION_WIDTH].map(|_| meta.advice_column());
+        let d_bits = allocated_d_bits.map_or_else(
+            || [(); KECCAK_REGION_WIDTH].map(|_| meta.advice_column()),
+            |d_bits| d_bits,
+        );
         let d_lens = [(); KECCAK_REGION_WIDTH_IN_BYTES].map(|_| meta.advice_column());
         let d_rlcs = [(); KECCAK_REGION_WIDTH_IN_BYTES].map(|_| meta.advice_column());
         let s_flags = [(); KECCAK_REGION_WIDTH_IN_BYTES].map(|_| meta.advice_column());

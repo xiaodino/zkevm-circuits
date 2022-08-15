@@ -88,18 +88,18 @@ pub(crate) struct KeccakRow<F> {
 /// KeccakBitConfig
 #[derive(Clone, Debug)]
 pub struct KeccakBitConfig<F> {
-    q_enable: Selector,
-    q_first: Selector,
-    q_round: Column<Fixed>,
-    q_absorb: Column<Fixed>,
-    q_end: Column<Advice>,
-    hash_rlc: Column<Advice>,
-    s_bits: [Column<Advice>; KECCAK_WIDTH],
-    c_bits: [Column<Advice>; C_WIDTH],
-    a_bits: [Column<Advice>; ABSORB_WIDTH_PER_ROW],
-    iota_bits: [Column<Fixed>; IOTA_ROUND_BIT_POS.len()],
-    c_table: Vec<TableColumn>,
-    _marker: PhantomData<F>,
+    pub(crate) q_enable: Selector,
+    pub(crate) q_first: Selector,
+    pub(crate) q_round: Column<Fixed>,
+    pub(crate) q_absorb: Column<Fixed>,
+    pub(crate) q_end: Column<Advice>,
+    pub(crate) hash_rlc: Column<Advice>,
+    pub(crate) s_bits: [Column<Advice>; KECCAK_WIDTH],
+    pub(crate) c_bits: [Column<Advice>; C_WIDTH],
+    pub(crate) a_bits: [Column<Advice>; ABSORB_WIDTH_PER_ROW],
+    pub(crate) iota_bits: [Column<Fixed>; IOTA_ROUND_BIT_POS.len()],
+    pub(crate) c_table: Vec<TableColumn>,
+    pub(crate) _marker: PhantomData<F>,
 }
 
 /// KeccakBitCircuit
