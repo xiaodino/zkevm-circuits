@@ -887,11 +887,12 @@ mod tests {
         let r = KeccakBitCircuit::r();
         let inputs = multi_keccak(
             vec![
-                // vec![],
+                vec![],
+                (0u8..1).collect::<Vec<_>>(),
                 (1u8..2).collect::<Vec<_>>(),
-                /* (0u8..135).collect::<Vec<_>>(),
-                 * (0u8..136).collect::<Vec<_>>(),
-                 * (0u8..200).collect::<Vec<_>>(), */
+                (0u8..135).collect::<Vec<_>>(),
+                (0u8..136).collect::<Vec<_>>(),
+                (0u8..200).collect::<Vec<_>>(),
             ],
             r,
         );
