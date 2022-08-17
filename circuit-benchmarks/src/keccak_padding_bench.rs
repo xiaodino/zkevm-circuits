@@ -17,7 +17,7 @@ mod tests {
     use std::fs::File;
     use std::io::BufReader;
     use zkevm_circuits::keccak_circuit::{
-        keccak_padding::KeccakPaddingCircuit,
+        keccak_complete_bit_2::KeccakCompleteBitCircuit, keccak_padding::KeccakPaddingCircuit,
         keccak_padding_multi_gadgets::KeccakMultiGadgetPaddingCircuit,
         keccak_padding_multirows::KeccakMultiRowPaddingCircuit,
         keccak_padding_multirows_2::KeccakPaddingMultiRowsExCircuit,
@@ -174,6 +174,28 @@ mod tests {
 
         println!("type4:");
         let empty_circuit = KeccakPaddingMultiRowsExCircuit::<Fr>::default();
+        bench_circuit(empty_circuit, params, degree);
+    }
+
+    #[test]
+    fn bench_keccak_bit_complete_2_circuit_prover() {
+        let degree: u32 = var("DEGREE")
+            .unwrap_or(String::from("12"))
+            .parse()
+            .expect("Cannot parse DEGREE env var as u32");
+
+        let params: Option<Params<G1Affine>> = {
+            let params_path: String = var("PARAMS_PATH")
+                .unwrap_or(String::from(format!("./params-{}", degree)))
+                .parse()
+                .expect("Cannot parse PARAMS_PATH env var");
+            File::open(&params_path)
+                .and_then(|fs| Params::read::<_>(&mut BufReader::new(fs)))
+                .ok()
+        };
+
+        println!("KeccakPaddingMultiRowsExCircuit:");
+        let empty_circuit = KeccakCompleteBitCircuit::<Fr>::default();
         bench_circuit(empty_circuit, params, degree);
     }
 }

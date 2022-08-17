@@ -6,7 +6,7 @@ use halo2_proofs::{
 use std::{env::var, marker::PhantomData};
 
 use super::{
-    keccak_bit::{KeccakBitConfig, KeccakRow},
+    keccak_bit::{keccak, KeccakBitConfig, KeccakRow, ABSORB_WIDTH_PER_ROW, C_WIDTH, KECCAK_WIDTH},
     keccak_padding_multirows_2::{KeccakPaddingBlock, KeccakPaddingConfig},
 };
 
@@ -25,7 +25,6 @@ pub struct KeccakCompleteBitConfig<F> {
 }
 
 /// KeccakBitCircuit
-#[derive(Default)]
 pub struct KeccakCompleteBitCircuit<F: Field> {
     inputs: Vec<KeccakRow<F>>,
     size: usize,
@@ -35,6 +34,32 @@ pub struct KeccakCompleteBitCircuit<F: Field> {
 impl<F: Field> KeccakCompleteBitCircuit<F> {
     fn r() -> F {
         F::from(123456)
+    }
+}
+
+impl<F: Field> Default for KeccakCompleteBitCircuit<F> {
+    fn default() -> Self {
+        let mut rows: Vec<KeccakRow<F>> = vec![KeccakRow {
+            s_bits: [0u8; KECCAK_WIDTH],
+            c_bits: [0u8; C_WIDTH],
+            a_bits: [0u8; ABSORB_WIDTH_PER_ROW],
+            q_end: 1u64,
+            hash_rlc: F::zero(),
+            input_len: 0u64,
+            input_rlc: F::zero(),
+        }];
+
+        // Actual keccaks
+        keccak(
+            &mut rows,
+            (0u64..65536).map(|v| (v % 255) as u8).collect::<Vec<_>>(),
+            KeccakCompleteBitCircuit::r(),
+        );
+        KeccakCompleteBitCircuit::<F> {
+            inputs: rows,
+            size: 2usize.pow(18),
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -97,7 +122,6 @@ impl<F: Field> KeccakCompleteBitConfig<F> {
                         keccak_row.c_bits,
                         keccak_row.a_bits,
                     )?;
-                    println!("offset {}, q_end {}", offset, keccak_row.q_end);
                 }
 
                 let keccak_padding_block: &KeccakPaddingBlock<F> = &witness.try_into().unwrap();
