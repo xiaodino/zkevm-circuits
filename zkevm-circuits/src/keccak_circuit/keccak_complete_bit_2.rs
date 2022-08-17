@@ -94,7 +94,8 @@ impl<F: Field> Circuit<F> for KeccakCompleteBitCircuit<F> {
 impl<F: Field> KeccakCompleteBitConfig<F> {
     pub(crate) fn configure(meta: &mut ConstraintSystem<F>, r: F) -> Self {
         let keccak_config = KeccakBitConfig::configure(meta, r);
-        let padding_config = KeccakPaddingConfig::configure(meta, Some(keccak_config.a_bits));
+        let padding_config =
+            KeccakPaddingConfig::configure(meta, Some(keccak_config.a_bits), keccak_config.q_end);
 
         KeccakCompleteBitConfig {
             keccak_config: keccak_config,
@@ -112,6 +113,7 @@ impl<F: Field> KeccakCompleteBitConfig<F> {
         layouter.assign_region(
             || "assign keccak rounds with padding",
             |mut region| {
+                assert!(witness.len() % 25 == 1);
                 for (offset, keccak_row) in witness.iter().enumerate() {
                     self.keccak_config.set_row(
                         &mut region,
@@ -122,18 +124,22 @@ impl<F: Field> KeccakCompleteBitConfig<F> {
                         keccak_row.c_bits,
                         keccak_row.a_bits,
                     )?;
+
+                    if (offset + 1) % 25 == 1 && offset > 0 {
+                        let keccak_padding_block: &KeccakPaddingBlock<F> =
+                            &witness[offset - 25..offset + 1].try_into().unwrap();
+                        // for row in &keccak_padding_block.block_rows {
+                        //     println!("row: {:?}", row);
+                        // }
+                        self.padding_config.set_region(
+                            &mut region,
+                            offset - 25, // to align the data with padding
+                            keccak_padding_block,
+                            r,
+                        )?;
+                    }
                 }
 
-                let keccak_padding_block: &KeccakPaddingBlock<F> = &witness.try_into().unwrap();
-                // for row in &keccak_padding_block.block_rows {
-                //     println!("row: {:?}", row);
-                // }
-                self.padding_config.set_region(
-                    &mut region,
-                    witness.len() - 25 - 1, // to align the data with padding
-                    keccak_padding_block,
-                    r,
-                )?;
                 Ok(())
             },
         )
@@ -229,6 +235,14 @@ mod tests {
         let k = 8;
         let r = KeccakCompleteBitCircuit::r();
         let inputs = complete_keccak((0..211).collect(), r);
+        verify::<Fr>(k, inputs, true);
+    }
+
+    #[test]
+    fn complete_bit_keccak_12345() {
+        let k = 12;
+        let r = KeccakCompleteBitCircuit::r();
+        let inputs = complete_keccak((0..12345u64).map(|v| v as u8).collect(), r);
         verify::<Fr>(k, inputs, true);
     }
 }

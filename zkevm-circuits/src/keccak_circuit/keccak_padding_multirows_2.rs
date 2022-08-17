@@ -24,7 +24,7 @@ pub struct KeccakPaddingConfig<F> {
     q_enable: Selector,
     q_first: Selector,
     q_last: Selector,
-    // q_end: Column<Advice>,
+    q_end: Column<Advice>,
     curr_padding_sum: Column<Advice>,
     d_bits: [Column<Advice>; KECCAK_REGION_WIDTH],
     d_lens: [Column<Advice>; KECCAK_REGION_WIDTH / 8],
@@ -190,7 +190,7 @@ impl<F: Field> From<&[KeccakRow<F>]> for KeccakPaddingBlock<F> {
         }
 
         KeccakPaddingBlock::<F> {
-            q_end: 1u64,
+            q_end: keccak_complete_rows.last().map_or(0, |row| row.q_end),
             acc_len: init_len,
             acc_rlc: init_rlc,
             block_rows: rows.try_into().unwrap(),
@@ -240,7 +240,8 @@ impl<F: Field> Circuit<F> for KeccakPaddingMultiRowsExCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        KeccakPaddingConfig::configure(meta, None)
+        let q_end = meta.advice_column();
+        KeccakPaddingConfig::configure(meta, None, q_end)
     }
 
     fn synthesize(&self, config: Self::Config, layouter: impl Layouter<F>) -> Result<(), Error> {
@@ -258,9 +259,10 @@ impl<F: Field> KeccakPaddingConfig<F> {
     pub(crate) fn configure(
         meta: &mut ConstraintSystem<F>,
         allocated_d_bits: Option<[Column<Advice>; KECCAK_REGION_WIDTH]>,
+        allocated_q_end: Column<Advice>,
     ) -> Self {
         let q_enable = meta.selector();
-        // let q_end = meta.advice_column();
+        let q_end = allocated_q_end;
         let q_first = meta.selector();
         let q_last = meta.selector();
         let curr_padding_sum = meta.advice_column();
@@ -381,9 +383,10 @@ impl<F: Field> KeccakPaddingConfig<F> {
         meta.create_gate("sum padding block bits == 2", |meta| {
             let mut cb = BaseConstraintBuilder::new(5);
             let curr_padding_sum = meta.query_advice(curr_padding_sum, Rotation::cur());
+            let is_last_block = meta.query_advice(q_end, Rotation(8));
             cb.require_equal(
-                "sum(padding_bits) == 2",
-                2u64.expr(),
+                "sum(padding_bits) == 2 * is_last_block_with_padding",
+                2u64.expr() * is_last_block,
                 curr_padding_sum.clone(),
             );
             cb.gate(meta.query_selector(q_last))
@@ -470,6 +473,33 @@ impl<F: Field> KeccakPaddingConfig<F> {
             cb.gate(meta.query_selector(q_enable))
         });
 
+        meta.create_gate("extern rlc and len to align with keecak_bit", |meta| {
+            // to align with the 25 rows keccak bit circuit.
+            let mut cb = BaseConstraintBuilder::new(5);
+
+            let rlc_last =
+                meta.query_advice(d_rlcs[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation::cur());
+            let align_block_rlc_last =
+                meta.query_advice(d_rlcs[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation(8));
+            let len_last =
+                meta.query_advice(d_lens[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation::cur());
+            let align_block_len_last =
+                meta.query_advice(d_lens[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation(8));
+            let s_flag_last =
+                meta.query_advice(s_flags[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation::cur());
+            let align_block_s_flag_last =
+                meta.query_advice(s_flags[KECCAK_REGION_WIDTH_IN_BYTES - 1], Rotation(8));
+
+            cb.require_equal("rlc_last == rlc_block_last", rlc_last, align_block_rlc_last);
+            cb.require_equal("len_last == len_block_last", len_last, align_block_len_last);
+            cb.require_equal(
+                "s_flag_last == s_flag_block_last",
+                s_flag_last,
+                align_block_s_flag_last,
+            );
+            cb.gate(meta.query_selector(q_last))
+        });
+
         // meta.create_gate("last row input ending check", |meta| {
         //     let mut cb = BaseConstraintBuilder::new(5);
 
@@ -483,7 +513,7 @@ impl<F: Field> KeccakPaddingConfig<F> {
             q_enable,
             q_first,
             q_last,
-            // q_end,
+            q_end,
             curr_padding_sum,
             d_bits,
             d_lens,
@@ -631,14 +661,45 @@ impl<F: Field> KeccakPaddingConfig<F> {
                 enabled_region_offset,
                 || Ok(F::from(randomness)),
             )?;
-
-            // region.assign_advice(
-            //     || format!("assign q_end{}", offset),
-            //     self.q_end,
-            //     enabled_region_offset,
-            //     || Ok(F::from(data_block.q_end)),
-            // )?;
         }
+
+        // This is to align data with keccak bit
+        let row_data = &data_block
+            .block_rows
+            .last()
+            .expect("last block row is valid");
+        let d_lens = row_data.d_lens;
+        let d_rlcs = row_data.d_rlcs;
+        let s_flags = row_data.s_flags;
+
+        let aligned_block_row_offset = offset + 1 + 24;
+        region.assign_advice(
+            || format!("assign aligned last d_lens{}", offset),
+            self.d_lens[self.d_lens.len() - 1],
+            aligned_block_row_offset,
+            || Ok(F::from(d_lens[d_lens.len() - 1])),
+        )?;
+
+        region.assign_advice(
+            || format!("assign aligned last s_flags{}", offset),
+            self.s_flags[self.s_flags.len() - 1],
+            aligned_block_row_offset,
+            || Ok(F::from(s_flags[s_flags.len() - 1])),
+        )?;
+
+        region.assign_advice(
+            || format!("assign aligned last d_rlcs{}", offset),
+            self.d_rlcs[self.d_rlcs.len() - 1],
+            aligned_block_row_offset,
+            || Ok(F::from(d_rlcs[d_rlcs.len() - 1])),
+        )?;
+
+        region.assign_advice(
+            || format!("assign q_end{}", offset),
+            self.q_end,
+            aligned_block_row_offset,
+            || Ok(F::from(data_block.q_end)),
+        )?;
 
         Ok(())
     }
