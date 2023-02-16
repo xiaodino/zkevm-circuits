@@ -184,14 +184,16 @@ impl From<&crate::Transaction> for Transaction {
 
 impl From<&Transaction> for TransactionRequest {
     fn from(tx: &Transaction) -> TransactionRequest {
-        TransactionRequest::new()
-            .from(tx.from)
-            .to(tx.to.unwrap())
-            .nonce(tx.nonce)
-            .value(tx.value)
-            .data(tx.call_data.clone())
-            .gas(tx.gas_limit)
-            .gas_price(tx.gas_price)
+        TransactionRequest {
+            from: Some(tx.from),
+            to: tx.to.map(NameOrAddress::Address),
+            gas: Some(tx.gas_limit),
+            gas_price: Some(tx.gas_price),
+            value: Some(tx.value),
+            data: Some(tx.call_data.clone()),
+            nonce: Some(tx.nonce),
+            ..Default::default()
+        }
     }
 }
 
