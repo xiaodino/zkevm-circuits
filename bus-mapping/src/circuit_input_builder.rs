@@ -561,7 +561,6 @@ impl<P: JsonRpcClient> BuilderClient<P> {
         &self,
         block_num: u64,
         txs_rlp: Option<&eth_types::Bytes>,
-        enable_skipping_invalid_tx: bool,
     ) -> Result<
         (
             CircuitInputBuilder,
@@ -573,9 +572,7 @@ impl<P: JsonRpcClient> BuilderClient<P> {
             self.get_block(block_num).await?;
 
         if let Some(txs_rlp) = txs_rlp {
-            if enable_skipping_invalid_tx {
-                self.check_invalid_txs(&eth_block, &mut *geth_traces, &txs_rlp);
-            }
+            self.check_invalid_txs(&eth_block, &mut *geth_traces, &txs_rlp);
         }
 
         for (tx, geth_trace) in eth_block.transactions.iter().zip(geth_traces.iter()) {
