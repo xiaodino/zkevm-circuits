@@ -248,6 +248,10 @@ impl<F: Field> TxCircuit<F> {
                             TxFieldTag::TxSignHash,
                             assigned_sig_verif.msg_hash_rlc.value().copied(),
                         ),
+                        (
+                            TxFieldTag::TxInvalid,
+                            Value::known(F::from(tx.invalid_signature as u64)),
+                        ),
                     ] {
                         let assigned_cell =
                             config.assign_row(&mut region, offset, i + 1, tag, 0, value)?;
@@ -342,7 +346,7 @@ impl<F: Field> SubCircuit<F> for TxCircuit<F> {
         config.load_aux_tables(layouter)?;
         let assigned_sig_verifs =
             self.sign_verify
-                .assign(&config.sign_verify, layouter, &sign_datas, challenges)?;
+                .assign(&config.sign_verify, layouter, &sign_datas, challenges, &self.txs)?;
         self.assign_tx_table(config, challenges, layouter, assigned_sig_verifs)?;
         Ok(())
     }
@@ -398,13 +402,15 @@ impl<F: Field> Circuit<F> for TxCircuit<F> {
 
 #[cfg(test)]
 mod tx_circuit_tests {
+    use crate::evm_circuit::util::Word;
+
     use super::*;
-    use eth_types::address;
+    use eth_types::{address, U64, U256};
     use halo2_proofs::{
         dev::{MockProver, VerifyFailure},
         halo2curves::bn256::Fr,
     };
-    use mock::AddrOrWallet;
+    use mock::{AddrOrWallet, MockTransaction};
     use pretty_assertions::assert_eq;
 
     fn run<F: Field>(
@@ -481,4 +487,79 @@ mod tx_circuit_tests {
         )
         .is_err(),);
     }
+
+    #[test]
+    fn tx_circuit_invalid_signature() {
+        let mut tx0 = mock::CORRECT_MOCK_TXS[0].clone();
+        tx0.v = Some(U64::one());
+
+        let mut tx1 = mock::CORRECT_MOCK_TXS[1].clone();
+        tx1.r = Some(U256::one());
+
+        let mut tx2 = mock::CORRECT_MOCK_TXS[2].clone();
+        tx2.s = Some(U256::one());
+
+        let mut tx3 = mock::CORRECT_MOCK_TXS[3].clone();
+        // This address doesn't correspond to the account that signed this tx.
+        tx3.from = AddrOrWallet::from(address!("0x1230000000000000000000000000000000000456"));
+
+        invalid_signature(vec![tx0.clone()], 1);
+        invalid_signature(vec![tx1.clone()], 1);
+        invalid_signature(vec![tx2.clone()], 1);
+        invalid_signature(vec![tx3.clone()], 1);
+
+        tx0.invalid_signature = true;
+        invalid_signature(vec![tx0.clone(), tx1.clone()], 2);
+    }
+
+    fn invalid_signature(mock_txs: Vec<MockTransaction>, max_txs: usize) {
+        const MAX_CALLDATA: usize = 32;
+
+        let txs = mock_txs.iter().map(|tx| Transaction::from(tx.clone())).collect();
+        let k = 20;
+        assert!(run::<Fr>(
+            k,
+            txs,
+            mock::MOCK_CHAIN_ID.as_u64(),
+            max_txs,
+            MAX_CALLDATA
+        )
+        .is_err(),);
+    }
+
+    #[test]
+    fn tx_circuit_skip_invalid_signature() {
+        let mut tx0 = mock::CORRECT_MOCK_TXS[0].clone();
+        tx0.v = Some(U64::one());
+        tx0.invalid_signature = true;
+
+        let mut tx1 = mock::CORRECT_MOCK_TXS[1].clone();
+        tx1.r = Some(U256::one());
+        tx1.invalid_signature = true;
+
+        let mut tx2 = mock::CORRECT_MOCK_TXS[2].clone();
+        tx2.s = Some(U256::one());
+        tx2.invalid_signature = true;
+
+        skip_invalid_signature(vec![tx0.clone()], 1);
+        skip_invalid_signature(vec![tx1.clone()], 1);
+        skip_invalid_signature(vec![tx2.clone()], 1);
+        skip_invalid_signature(vec![tx0.clone(), tx1.clone()], 2);
+    }
+
+    fn skip_invalid_signature(mock_txs: Vec<MockTransaction>, max_txs: usize) {
+        const MAX_CALLDATA: usize = 32;
+
+        let txs = mock_txs.iter().map(|tx| Transaction::from(tx.clone())).collect();
+        let k = 19;
+        assert_eq!(run::<Fr>(
+            k,
+            txs,
+            mock::MOCK_CHAIN_ID.as_u64(),
+            max_txs,
+            MAX_CALLDATA
+        ),
+        Ok(()));
+    }
+
 }

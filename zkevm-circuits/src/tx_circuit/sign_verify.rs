@@ -10,8 +10,11 @@ use crate::{
     util::{Challenges, Expr},
 };
 use ecc::{maingate, EccConfig, GeneralEccChip};
+
 use ecdsa::ecdsa::{AssignedEcdsaSig, AssignedPublicKey, EcdsaChip};
+
 use eth_types::sign_types::{pk_bytes_le, pk_bytes_swap_endianness, SignData};
+use eth_types::geth_types::Transaction;
 use eth_types::{self, Field};
 use halo2_proofs::{
     arithmetic::{CurveAffine, FieldExt},
@@ -596,6 +599,7 @@ impl<F: Field> SignVerifyChip<F> {
         layouter: &mut impl Layouter<F>,
         signatures: &[SignData],
         challenges: &Challenges<Value<F>>,
+        txs: &Vec<Transaction>,
     ) -> Result<Vec<AssignedSignatureVerify<F>>, Error> {
         if signatures.len() > self.max_verif {
             error!(
@@ -654,6 +658,10 @@ impl<F: Field> SignVerifyChip<F> {
                 let mut ctx = RegionCtx::new(region, 0);
                 for (i, assigned_ecdsa) in assigned_ecdsas.iter().enumerate() {
                     let sign_data = signatures.get(i); // None when padding (enabled when address == 0)
+                    let tx = txs.get(i);
+                    if tx.map(|x| x.invalid_signature) == Some(true) {
+                        continue;
+                    }
                     let assigned_sig_verif = self.assign_signature_verify(
                         config,
                         &mut ctx,
@@ -744,12 +752,14 @@ mod sign_verify_tests {
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
             let challenges = config.challenges.values(&mut layouter);
+            let tx_default = Transaction::default();
 
             self.sign_verify.assign(
                 &config.sign_verify,
                 &mut layouter,
                 &self.signatures,
                 &challenges,
+                &vec![tx_default]
             )?;
             config.sign_verify.keccak_table.dev_load(
                 &mut layouter,
