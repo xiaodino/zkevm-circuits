@@ -425,7 +425,10 @@ mod tx_circuit_tests {
 
         let prover = match MockProver::run(k, &circuit, vec![vec![]]) {
             Ok(prover) => prover,
-            Err(e) => panic!("{:#?}", e),
+            Err(e) => {
+                eprintln!("Error: {:#?}", e); // Print error to standard error stream
+                panic!("Failed to create prover");
+            }
         };
         prover.verify()
     }
