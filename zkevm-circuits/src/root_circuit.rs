@@ -113,7 +113,6 @@ impl<'a, M: MultiMillerLoop> Circuit<M::Scalar> for RootCircuit<'a, M> {
             config.aggregate::<M>(&mut layouter, &self.svk, [self.snark])?;
 
         // Constrain equality to instance values
-        /*
         let main_gate = config.main_gate();
         for (row, limb) in instances
             .into_iter()
@@ -122,9 +121,8 @@ impl<'a, M: MultiMillerLoop> Circuit<M::Scalar> for RootCircuit<'a, M> {
             .chain(accumulator_limbs)
             .enumerate()
         {
-            // main_gate.expose_public(layouter.namespace(|| ""), limb, row)?;
+            main_gate.expose_public(layouter.namespace(|| ""), limb, row)?;
         }
-        */
 
         Ok(())
     }

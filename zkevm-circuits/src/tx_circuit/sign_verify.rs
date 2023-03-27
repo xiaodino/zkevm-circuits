@@ -387,7 +387,10 @@ impl<F: Field> SignVerifyChip<F> {
 
         // Ref. spec SignVerifyChip 4. Verify the ECDSA signature
         let mut my_dict: HashMap<String, usize> = HashMap::new();
-        ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash, &mut my_dict)?;
+
+        ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash)?;
+
+        println!("ecdsa offsets {:?}", &my_dict);
 
         // TODO: Update once halo2wrong suports the following methods:
         // - `IntegerChip::assign_integer_from_bytes_le`
