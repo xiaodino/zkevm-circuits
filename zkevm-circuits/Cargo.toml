@@ -27,10 +27,10 @@ lazy_static = "1.4"
 keccak256 = { path = "../keccak256" }
 log = "0.4"
 env_logger = "0.9"
-ecdsa = { git = "https://github.com/xiaodino/halo2wrong", rev = "63bde545d934e69c806ef9bc8b18f03f6ec0fe8e" }
-ecc = { git = "https://github.com/xiaodino/halo2wrong", rev = "63bde545d934e69c806ef9bc8b18f03f6ec0fe8e" }
-maingate = { git = "https://github.com/xiaodino/halo2wrong", rev = "63bde545d934e69c806ef9bc8b18f03f6ec0fe8e" }
-integer = { git = "https://github.com/xiaodino/halo2wrong", rev = "63bde545d934e69c806ef9bc8b18f03f6ec0fe8e" }
+ecdsa = { git = "https://github.com/xiaodino/halo2wrong", rev = "dbfbcd7bc4902957f8865ca319b303e7dc51066a" }
+ecc = { git = "https://github.com/xiaodino/halo2wrong", rev = "dbfbcd7bc4902957f8865ca319b303e7dc51066a" }
+maingate = { git = "https://github.com/xiaodino/halo2wrong", rev = "dbfbcd7bc4902957f8865ca319b303e7dc51066a" }
+integer = { git = "https://github.com/xiaodino/halo2wrong", rev = "dbfbcd7bc4902957f8865ca319b303e7dc51066a" }
 libsecp256k1 = "0.7"
 num-bigint = { version = "0.4" }
 subtle = "2.4"

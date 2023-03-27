@@ -388,7 +388,7 @@ impl<F: Field> SignVerifyChip<F> {
         // Ref. spec SignVerifyChip 4. Verify the ECDSA signature
         let mut my_dict: HashMap<String, usize> = HashMap::new();
 
-        ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash)?;
+        ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash, &mut my_dict)?;
 
         println!("ecdsa offsets {:?}", &my_dict);
 
