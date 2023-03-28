@@ -345,6 +345,7 @@ impl<F: Field> SignVerifyChip<F> {
         ctx: &mut RegionCtx<F>,
         chips: &ChipsRef<F, NUMBER_OF_LIMBS, BIT_LEN_LIMB>,
         sign_data: &SignData,
+        offsets: &mut HashMap<String, usize>,
     ) -> Result<AssignedECDSA<F>, Error> {
         let SignData {
             signature,
@@ -386,11 +387,8 @@ impl<F: Field> SignVerifyChip<F> {
         let pk_y_le = integer_to_bytes_le(ctx, range_chip, pk_y)?;
 
         // Ref. spec SignVerifyChip 4. Verify the ECDSA signature
-        let mut my_dict: HashMap<String, usize> = HashMap::new();
-
-        ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash, &mut my_dict)?;
-
-        println!("ecdsa offsets {:?}", &my_dict);
+        ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash, offsets)?;
+        println!("ecdsa offsets {:?}", offsets);
 
         // TODO: Update once halo2wrong suports the following methods:
         // - `IntegerChip::assign_integer_from_bytes_le`
@@ -605,6 +603,7 @@ impl<F: Field> SignVerifyChip<F> {
         signatures: &[SignData],
         challenges: &Challenges<Value<F>>,
         txs: &Vec<Transaction>,
+        offsets: &mut HashMap<String, usize>,
     ) -> Result<Vec<AssignedSignatureVerify<F>>, Error> {
         if signatures.len() > self.max_verif {
             error!(
@@ -649,7 +648,11 @@ impl<F: Field> SignVerifyChip<F> {
                         // padding (enabled when address == 0)
                         SignData::default()
                     };
-                    let assigned_ecdsa = self.assign_ecdsa(&mut ctx, &chips, &signature)?;
+
+                    // let mut my_dict: HashMap<String, usize> = HashMap::new();
+                    let assigned_ecdsa = self.assign_ecdsa(&mut ctx, &chips, &signature, offsets)?;
+                    // offsets = my_dict.into();
+
                     assigned_ecdsas.push(assigned_ecdsa);
                 }
                 Ok(assigned_ecdsas)
@@ -664,6 +667,7 @@ impl<F: Field> SignVerifyChip<F> {
                 for (i, assigned_ecdsa) in assigned_ecdsas.iter().enumerate() {
                     let sign_data = signatures.get(i); // None when padding (enabled when address == 0)
                     let tx = txs.get(i);
+                    // invalid_signature 
                     if tx.map(|x| x.invalid_signature) == Some(true) {
                         continue;
                     }
@@ -759,12 +763,15 @@ mod sign_verify_tests {
             let challenges = config.challenges.values(&mut layouter);
             let tx_default = Transaction::default();
 
+            let mut my_dict: HashMap<String, usize> = HashMap::new();
+
             self.sign_verify.assign(
                 &config.sign_verify,
                 &mut layouter,
                 &self.signatures,
                 &challenges,
-                &vec![tx_default]
+                &vec![tx_default],
+                &mut my_dict,
             )?;
             config.sign_verify.keccak_table.dev_load(
                 &mut layouter,

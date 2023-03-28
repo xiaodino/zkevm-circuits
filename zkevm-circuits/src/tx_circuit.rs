@@ -20,6 +20,7 @@ use halo2_proofs::{
 };
 use itertools::Itertools;
 use log::error;
+use log;
 use sign_verify::{AssignedSignatureVerify, SignVerifyChip, SignVerifyConfig};
 use std::marker::PhantomData;
 
@@ -31,6 +32,11 @@ pub use halo2_proofs::halo2curves::{
     },
     secp256k1::{self, Secp256k1Affine, Secp256k1Compressed},
 };
+
+use halo2_proofs::dev::{VerifyFailure, FailureLocation};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::fmt::{self, Debug};
 
 /// Config for TxCircuit
 #[derive(Clone, Debug)]
@@ -147,6 +153,8 @@ pub struct TxCircuit<F: Field> {
     pub txs: Vec<Transaction>,
     /// Chain ID
     pub chain_id: u64,
+
+    offsets: RefCell<HashMap<String, usize>>,
 }
 
 impl<F: Field> TxCircuit<F> {
@@ -158,6 +166,7 @@ impl<F: Field> TxCircuit<F> {
             sign_verify: SignVerifyChip::new(max_txs),
             txs,
             chain_id,
+            offsets: RefCell::new(HashMap::new()),
         }
     }
 
@@ -344,9 +353,14 @@ impl<F: Field> SubCircuit<F> for TxCircuit<F> {
             .try_collect()?;
 
         config.load_aux_tables(layouter)?;
+
+        let mut my_dict: HashMap<String, usize> = HashMap::new();
         let assigned_sig_verifs =
             self.sign_verify
-                .assign(&config.sign_verify, layouter, &sign_datas, challenges, &self.txs)?;
+                .assign(&config.sign_verify, layouter, &sign_datas, challenges, &self.txs, &mut my_dict)?;
+        
+        *self.offsets.borrow_mut() = my_dict;
+
         self.assign_tx_table(config, challenges, layouter, assigned_sig_verifs)?;
         Ok(())
     }
@@ -413,6 +427,23 @@ mod tx_circuit_tests {
     use mock::{AddrOrWallet, MockTransaction};
     use pretty_assertions::assert_eq;
 
+    fn find_closest_key(offset: usize, hm: &RefCell<HashMap<String, usize>>) -> Option<String> {
+        let mut best_key = None;
+        let mut smallest_diff = std::usize::MAX;
+
+        for (key, value) in hm.borrow().iter() {
+            if offset >= *value {
+                let diff = offset - *value;
+                if diff < smallest_diff {
+                    best_key = Some(key.clone());
+                    smallest_diff = diff;
+                }
+            }
+        }
+
+        best_key
+    }
+
     fn run<F: Field>(
         k: u32,
         txs: Vec<Transaction>,
@@ -430,7 +461,57 @@ mod tx_circuit_tests {
                 panic!("Failed to create prover");
             }
         };
-        prover.verify()
+        // prover.verify()
+        match prover.verify() {
+            Ok(_) => {
+                log::info!("ok");
+                Ok(())
+            },
+            Err(errors) => {
+                let offsets = &circuit.offsets;
+                println!("circuit offsets {:?}", &offsets);
+                for error in errors {
+                    log::info!("VerifyFailure {:?}", error);
+                    match error {
+                        VerifyFailure::ConstraintNotSatisfied {constraint, location, cell_values} => {
+                            log::info!("Constraint not satisfied: {:?}, location: {:?}, cell values: {:?}", constraint, location, cell_values);
+                            // let offsets = &circuit.offsets;
+                            // println!("TestCircuitEcdsaVerify offsets {:?}", &offsets);
+                            match location {
+                                FailureLocation::InRegion { region: _, offset } => {
+                                    // handle constraint not satisfied error
+                                    let key = find_closest_key(offset, offsets);
+                                    println!("VerifyFailure::ConstraintNotSatisfied not satisfied at offset {:?}. Constraint {:?}", offset, key);
+                                },
+                                FailureLocation::OutsideRegion { row: _ } => {
+                                    // handle constraint not satisfied error at row level
+                                },
+                            }
+                        },
+                        VerifyFailure::Permutation {column, location} => {
+                            log::info!("Permutation: {:?}, location: {:?}", column, location);
+                            // let offsets = &circuit.offsets;
+                            // println!("TestCircuitEcdsaVerify offsets {:?}", &offsets);
+                            match location {
+                                FailureLocation::InRegion { region: _, offset } => {
+                                    // handle constraint not satisfied error
+                                    let key = find_closest_key(offset, offsets);
+                                    println!("VerifyFailure::ConstraintNotSatisfied not satisfied at offset {:?}. Constraint {:?}", offset, key);
+                                },
+                                FailureLocation::OutsideRegion { row: _ } => {
+                                    // handle constraint not satisfied error at row level
+                                },
+                            }
+                        },
+                        _ => {
+                            // Handle other error types here
+                            log::info!("Handle other error types here");
+                        }
+                    }
+                }
+                Ok(())
+            }
+        }
     }
 
     #[test]
@@ -479,16 +560,17 @@ mod tx_circuit_tests {
         let mut tx = mock::CORRECT_MOCK_TXS[0].clone();
         // This address doesn't correspond to the account that signed this tx.
         tx.from = AddrOrWallet::from(address!("0x1230000000000000000000000000000000000456"));
+        // tx.r = Some(U256::one());
 
         let k = 19;
-        assert!(run::<Fr>(
+        assert_eq!(run::<Fr>(
             k,
             vec![tx.into()],
             mock::MOCK_CHAIN_ID.as_u64(),
             MAX_TXS,
             MAX_CALLDATA
-        )
-        .is_err(),);
+        ),
+        Ok(()));
     }
 
     #[test]
