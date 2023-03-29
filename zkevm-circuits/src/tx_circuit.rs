@@ -416,8 +416,6 @@ impl<F: Field> Circuit<F> for TxCircuit<F> {
 
 #[cfg(test)]
 mod tx_circuit_tests {
-    use crate::evm_circuit::util::Word;
-
     use super::*;
     use eth_types::{address, U64, U256};
     use halo2_proofs::{
@@ -469,7 +467,7 @@ mod tx_circuit_tests {
             Err(errors) => {
                 let offsets = &circuit.offsets;
                 println!("circuit offsets {:?}", &offsets);
-                for error in errors {
+                for error in &errors {
                     log::info!("VerifyFailure {:?}", error);
                     match error {
                         VerifyFailure::ConstraintNotSatisfied {constraint, location, cell_values} => {
@@ -477,7 +475,7 @@ mod tx_circuit_tests {
                             match location {
                                 FailureLocation::InRegion { region: _, offset } => {
                                     // handle constraint not satisfied error
-                                    let key = find_closest_key(offset, offsets);
+                                    let key = find_closest_key(*offset, offsets);
                                     println!("VerifyFailure::ConstraintNotSatisfied at offset {:?}. Constraint {:?}", offset, key);
                                 },
                                 FailureLocation::OutsideRegion { row: _ } => {
@@ -492,7 +490,7 @@ mod tx_circuit_tests {
                             match location {
                                 FailureLocation::InRegion { region: _, offset } => {
                                     // handle constraint not satisfied error
-                                    let key = find_closest_key(offset, offsets);
+                                    let key = find_closest_key(*offset, offsets);
                                     println!("VerifyFailure::Permutation at offset {:?}. Constraint {:?}", offset, key);
                                 },
                                 FailureLocation::OutsideRegion { row: _ } => {
@@ -506,7 +504,7 @@ mod tx_circuit_tests {
                         }
                     }
                 }
-                Ok(())
+                Err(errors.into())
             }
         }
     }
