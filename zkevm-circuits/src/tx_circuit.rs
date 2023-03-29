@@ -461,7 +461,6 @@ mod tx_circuit_tests {
                 panic!("Failed to create prover");
             }
         };
-        // prover.verify()
         match prover.verify() {
             Ok(_) => {
                 log::info!("ok");
@@ -474,14 +473,12 @@ mod tx_circuit_tests {
                     log::info!("VerifyFailure {:?}", error);
                     match error {
                         VerifyFailure::ConstraintNotSatisfied {constraint, location, cell_values} => {
-                            log::info!("Constraint not satisfied: {:?}, location: {:?}, cell values: {:?}", constraint, location, cell_values);
-                            // let offsets = &circuit.offsets;
-                            // println!("TestCircuitEcdsaVerify offsets {:?}", &offsets);
+                            log::info!("VerifyFailure::ConstraintNotSatisfied: {:?}, location: {:?}, cell values: {:?}", constraint, location, cell_values);
                             match location {
                                 FailureLocation::InRegion { region: _, offset } => {
                                     // handle constraint not satisfied error
                                     let key = find_closest_key(offset, offsets);
-                                    println!("VerifyFailure::ConstraintNotSatisfied not satisfied at offset {:?}. Constraint {:?}", offset, key);
+                                    println!("VerifyFailure::ConstraintNotSatisfied at offset {:?}. Constraint {:?}", offset, key);
                                 },
                                 FailureLocation::OutsideRegion { row: _ } => {
                                     // handle constraint not satisfied error at row level
@@ -489,14 +486,14 @@ mod tx_circuit_tests {
                             }
                         },
                         VerifyFailure::Permutation {column, location} => {
-                            log::info!("Permutation: {:?}, location: {:?}", column, location);
+                            log::info!("VerifyFailure::Permutation: {:?}, location: {:?}", column, location);
                             // let offsets = &circuit.offsets;
                             // println!("TestCircuitEcdsaVerify offsets {:?}", &offsets);
                             match location {
                                 FailureLocation::InRegion { region: _, offset } => {
                                     // handle constraint not satisfied error
                                     let key = find_closest_key(offset, offsets);
-                                    println!("VerifyFailure::ConstraintNotSatisfied not satisfied at offset {:?}. Constraint {:?}", offset, key);
+                                    println!("VerifyFailure::Permutation at offset {:?}. Constraint {:?}", offset, key);
                                 },
                                 FailureLocation::OutsideRegion { row: _ } => {
                                     // handle constraint not satisfied error at row level
