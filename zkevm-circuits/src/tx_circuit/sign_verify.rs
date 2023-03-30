@@ -648,11 +648,7 @@ impl<F: Field> SignVerifyChip<F> {
                         // padding (enabled when address == 0)
                         SignData::default()
                     };
-
-                    // let mut my_dict: HashMap<String, usize> = HashMap::new();
                     let assigned_ecdsa = self.assign_ecdsa(&mut ctx, &chips, &signature, offsets)?;
-                    // offsets = my_dict.into();
-
                     assigned_ecdsas.push(assigned_ecdsa);
                 }
                 Ok(assigned_ecdsas)
@@ -762,9 +758,7 @@ mod sign_verify_tests {
         ) -> Result<(), Error> {
             let challenges = config.challenges.values(&mut layouter);
             let tx_default = Transaction::default();
-
             let mut my_dict: HashMap<String, usize> = HashMap::new();
-
             self.sign_verify.assign(
                 &config.sign_verify,
                 &mut layouter,
