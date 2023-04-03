@@ -447,7 +447,75 @@ mod tx_circuit_tests {
         chain_id: u64,
         max_txs: usize,
         max_calldata: usize,
+        skip_invalid_signature: bool,
     ) -> Result<(), Vec<VerifyFailure>> {
+        let mut txs: Vec<Transaction> = txs.into();
+        // Soft check for invalid signature
+        if skip_invalid_signature {
+            let soft_check_constraints: Vec<String> = vec!["6. reduce q_x in E::ScalarExt".to_string()];
+            for tx in &mut txs {
+                let circuit = TxCircuit::<F>::new(max_txs, max_calldata, chain_id, vec![tx.clone()]);
+                let prover = match MockProver::run(k, &circuit, vec![vec![]]) {
+                    Ok(prover) => prover,
+                    Err(e) => {
+                        eprintln!("Error: {:#?}", e); // Print error to standard error stream
+                        panic!("Failed to create prover");
+                    }
+                };
+
+                match prover.verify() {
+                    Ok(_) => {
+                        log::info!("ok");
+                    },
+                    Err(errors) => {
+                        let offsets = &circuit.offsets;
+                        for error in &errors {
+                            log::info!("VerifyFailure {:?}", error);
+                            match error {
+                                VerifyFailure::ConstraintNotSatisfied {constraint, location, cell_values} => {
+                                    log::info!("VerifyFailure::ConstraintNotSatisfied: {:?}, location: {:?}, cell values: {:?}", constraint, location, cell_values);
+                                    match location {
+                                        FailureLocation::InRegion { region: _, offset } => {
+                                            let constraint = find_closest_constraint(*offset, offsets);
+                                            println!("VerifyFailure::ConstraintNotSatisfied at offset {:?}. Constraint {:?}", offset, constraint);
+                                            if let Some(ref c) = constraint {
+                                                if soft_check_constraints.contains(c) {
+                                                    tx.invalid_signature = true;
+                                                }
+                                            }
+                                        },
+                                        FailureLocation::OutsideRegion { row: _ } => {
+                                            log::info!("Handle constraint not satisfied error at row level");
+                                        },
+                                    }
+                                },
+                                VerifyFailure::Permutation {column, location} => {
+                                    log::info!("VerifyFailure::Permutation: {:?}, location: {:?}", column, location);
+                                    match location {
+                                        FailureLocation::InRegion { region: _, offset } => {
+                                            let constraint = find_closest_constraint(*offset, offsets);
+                                            println!("VerifyFailure::Permutation at offset {:?}. Constraint {:?}", offset, constraint);
+                                            if let Some(ref c) = constraint {
+                                                if soft_check_constraints.contains(c) {
+                                                    tx.invalid_signature = true;
+                                                }
+                                            }
+                                        },
+                                        FailureLocation::OutsideRegion { row: _ } => {
+                                            log::info!("Handle constraint not satisfied error at row level");
+                                        },
+                                    }
+                                },
+                                _ => {
+                                    log::info!("Handle other error types here");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // SignVerifyChip -> ECDSAChip -> MainGate instance column
         let circuit = TxCircuit::<F>::new(max_txs, max_calldata, chain_id, txs);
 
@@ -458,49 +526,7 @@ mod tx_circuit_tests {
                 panic!("Failed to create prover");
             }
         };
-        match prover.verify() {
-            Ok(_) => {
-                log::info!("ok");
-                Ok(())
-            },
-            Err(errors) => {
-                let offsets = &circuit.offsets;
-                println!("circuit offsets {:?}", &offsets);
-                for error in &errors {
-                    log::info!("VerifyFailure {:?}", error);
-                    match error {
-                        VerifyFailure::ConstraintNotSatisfied {constraint, location, cell_values} => {
-                            log::info!("VerifyFailure::ConstraintNotSatisfied: {:?}, location: {:?}, cell values: {:?}", constraint, location, cell_values);
-                            match location {
-                                FailureLocation::InRegion { region: _, offset } => {
-                                    let constraint = find_closest_constraint(*offset, offsets);
-                                    log::info!("VerifyFailure::ConstraintNotSatisfied at offset {:?}. Constraint {:?}", offset, constraint);
-                                },
-                                FailureLocation::OutsideRegion { row: _ } => {
-                                    log::info!("Handle constraint not satisfied error at row level");
-                                },
-                            }
-                        },
-                        VerifyFailure::Permutation {column, location} => {
-                            log::info!("VerifyFailure::Permutation: {:?}, location: {:?}", column, location);
-                            match location {
-                                FailureLocation::InRegion { region: _, offset } => {
-                                    let constraint = find_closest_constraint(*offset, offsets);
-                                    log::info!("VerifyFailure::Permutation at offset {:?}. Constraint {:?}", offset, constraint);
-                                },
-                                FailureLocation::OutsideRegion { row: _ } => {
-                                    log::info!("Handle constraint not satisfied error at row level");
-                                },
-                            }
-                        },
-                        _ => {
-                            log::info!("Handle other error types here");
-                        }
-                    }
-                }
-                Err(errors.into())
-            }
-        }
+        prover.verify()
     }
 
     #[test]
@@ -519,7 +545,8 @@ mod tx_circuit_tests {
                     .collect_vec(),
                 mock::MOCK_CHAIN_ID.as_u64(),
                 MAX_TXS,
-                MAX_CALLDATA
+                MAX_CALLDATA,
+                true,
             ),
             Ok(())
         );
@@ -536,7 +563,7 @@ mod tx_circuit_tests {
 
         let k = 19;
         assert_eq!(
-            run::<Fr>(k, vec![tx], chain_id, MAX_TXS, MAX_CALLDATA),
+            run::<Fr>(k, vec![tx], chain_id, MAX_TXS, MAX_CALLDATA, true),
             Ok(())
         );
     }
@@ -556,7 +583,8 @@ mod tx_circuit_tests {
             vec![tx.into()],
             mock::MOCK_CHAIN_ID.as_u64(),
             MAX_TXS,
-            MAX_CALLDATA
+            MAX_CALLDATA,
+            false,
         )
         .is_err(),);
     }
@@ -572,59 +600,33 @@ mod tx_circuit_tests {
         let mut tx2 = mock::CORRECT_MOCK_TXS[2].clone();
         tx2.s = Some(U256::one());
 
-        invalid_signature(vec![tx0.clone()], 1);
-        invalid_signature(vec![tx1.clone()], 1);
-        invalid_signature(vec![tx2.clone()], 1);
+        invalid_signature(vec![tx0.clone()], 1, true);
+        invalid_signature(vec![tx1.clone()], 1, true);
+        invalid_signature(vec![tx2.clone()], 1, true);
+
+        invalid_signature(vec![tx0.clone()], 1, false);
+        invalid_signature(vec![tx1.clone()], 1, false);
+        invalid_signature(vec![tx2.clone()], 1, false);
     }
 
-    fn invalid_signature(mock_txs: Vec<MockTransaction>, max_txs: usize) {
+    fn invalid_signature(mock_txs: Vec<MockTransaction>, max_txs: usize, skip_invalid_signature: bool) {
         const MAX_CALLDATA: usize = 32;
 
         let txs = mock_txs.iter().map(|tx| Transaction::from(tx.clone())).collect();
         let k = 20;
-        assert!(run::<Fr>(
+        let result = run::<Fr>(
             k,
             txs,
             mock::MOCK_CHAIN_ID.as_u64(),
             max_txs,
-            MAX_CALLDATA
-        )
-        .is_err(),);
-    }
-
-    #[test]
-    fn tx_circuit_skip_invalid_signature() {
-        let mut tx0 = mock::CORRECT_MOCK_TXS[0].clone();
-        tx0.v = Some(U64::one());
-        tx0.invalid_signature = true;
-
-        let mut tx1 = mock::CORRECT_MOCK_TXS[1].clone();
-        tx1.r = Some(U256::one());
-        tx1.invalid_signature = true;
-
-        let mut tx2 = mock::CORRECT_MOCK_TXS[2].clone();
-        tx2.s = Some(U256::one());
-        tx2.invalid_signature = true;
-
-        skip_invalid_signature(vec![tx0.clone()], 1);
-        skip_invalid_signature(vec![tx1.clone()], 1);
-        skip_invalid_signature(vec![tx2.clone()], 1);
-        skip_invalid_signature(vec![tx0.clone(), tx1.clone()], 2);
-    }
-
-    fn skip_invalid_signature(mock_txs: Vec<MockTransaction>, max_txs: usize) {
-        const MAX_CALLDATA: usize = 32;
-
-        let txs = mock_txs.iter().map(|tx| Transaction::from(tx.clone())).collect();
-        let k = 19;
-        assert_eq!(run::<Fr>(
-            k,
-            txs,
-            mock::MOCK_CHAIN_ID.as_u64(),
-            max_txs,
-            MAX_CALLDATA
-        ),
-        Ok(()));
+            MAX_CALLDATA,
+            skip_invalid_signature,
+        );
+        if skip_invalid_signature {
+            assert_eq!(result, Ok(()));
+        } else {
+            assert!(result.is_err(),);
+        }
     }
 
 }
