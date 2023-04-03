@@ -549,17 +549,16 @@ mod tx_circuit_tests {
         let mut tx = mock::CORRECT_MOCK_TXS[0].clone();
         // This address doesn't correspond to the account that signed this tx.
         tx.from = AddrOrWallet::from(address!("0x1230000000000000000000000000000000000456"));
-        // tx.r = Some(U256::one());
 
         let k = 19;
-        assert_eq!(run::<Fr>(
+        assert!(run::<Fr>(
             k,
             vec![tx.into()],
             mock::MOCK_CHAIN_ID.as_u64(),
             MAX_TXS,
             MAX_CALLDATA
-        ),
-        Ok(()));
+        )
+        .is_err(),);
     }
 
     #[test]

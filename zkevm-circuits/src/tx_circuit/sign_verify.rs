@@ -758,14 +758,14 @@ mod sign_verify_tests {
         ) -> Result<(), Error> {
             let challenges = config.challenges.values(&mut layouter);
             let tx_default = Transaction::default();
-            let mut my_dict: HashMap<String, usize> = HashMap::new();
+            let mut offsets: HashMap<String, usize> = HashMap::new();
             self.sign_verify.assign(
                 &config.sign_verify,
                 &mut layouter,
                 &self.signatures,
                 &challenges,
                 &vec![tx_default],
-                &mut my_dict,
+                &mut offsets,
             )?;
             config.sign_verify.keccak_table.dev_load(
                 &mut layouter,
