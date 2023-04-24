@@ -294,6 +294,7 @@ pub(crate) struct AssignedECDSA<F: Field> {
 pub(crate) struct AssignedSignatureVerify<F: Field> {
     pub(crate) address: AssignedValue<F>,
     pub(crate) msg_hash_rlc: AssignedValue<F>,
+    pub(crate) is_invalid: AssignedValue<F>,
 }
 
 // Return an array of bytes that corresponds to the little endian representation
@@ -346,6 +347,7 @@ impl<F: Field> SignVerifyChip<F> {
         ctx: &mut RegionCtx<F>,
         chips: &ChipsRef<F, NUMBER_OF_LIMBS, BIT_LEN_LIMB>,
         sign_data: &SignData,
+        enable_skipping_invalid_signature: bool,
     ) -> Result<AssignedECDSA<F>, Error> {
         let SignData {
             signature,
@@ -387,7 +389,6 @@ impl<F: Field> SignVerifyChip<F> {
         let pk_y_le = integer_to_bytes_le(ctx, range_chip, pk_y)?;
 
         // Ref. spec SignVerifyChip 4. Verify the ECDSA signature
-        let enable_skipping_invalid_signature = false;
         let mut offsets:HashMap<String, usize> = HashMap::new();
         let is_ecdsa_signature_valid = ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash, &mut offsets, enable_skipping_invalid_signature)?;
         println!("ecdsa offsets {:?}", offsets);
@@ -485,10 +486,8 @@ impl<F: Field> SignVerifyChip<F> {
         sign_data: Option<&SignData>,
         assigned_ecdsa: &AssignedECDSA<F>,
         challenges: &Challenges<Value<F>>,
+        tx: &Transaction,
     ) -> Result<AssignedSignatureVerify<F>, Error> {
-        let mut offsets:HashMap<String, usize> = HashMap::new();
-        offsets.insert("assign_signature_verify at begin".to_string(), ctx.offset());
-
         let main_gate = chips.main_gate;
 
         let (padding, sign_data) = match sign_data {
@@ -508,6 +507,8 @@ impl<F: Field> SignVerifyChip<F> {
             .unwrap_or_default()
             .map(|byte| Value::known(F::from(byte as u64)));
         let pk_hash_hi = pk_hash[..12].to_vec();
+
+        // TODO: How to deal with this when it's invalid signature?
         // Ref. spec SignVerifyChip 2. Verify that the first 20 bytes of the
         // pub_key_hash equal the address
         let (address, pk_hash_lo) = {
@@ -532,6 +533,26 @@ impl<F: Field> SignVerifyChip<F> {
                     .collect_vec(),
             )
         };
+
+        let tx_address = {
+            let tx_from_fixed_bytes = tx.from.to_fixed_bytes().map(|byte| Value::known(F::from(byte as u64)));
+            let powers_of_256 =
+                iter::successors(Some(F::one()), |coeff| Some(F::from(256) * coeff))
+                    .take(20)
+                    .collect_vec();
+            let terms = tx_from_fixed_bytes
+                .iter()
+                .zip(powers_of_256.into_iter().rev())
+                .map(|(byte, coeff)| maingate::Term::Unassigned(*byte, coeff))
+                .collect_vec();
+            let (address, _) =
+                main_gate.decompose(ctx, &terms, F::zero(), |_, _| Ok(()))?;
+            address
+        };
+
+        let enable_skipping_invalid_signature = main_gate.assign_constant(ctx, F::from(tx.enable_skipping_invalid_signature))?;
+        let address_returned: AssignedCell<F, F> = main_gate.select(ctx, &tx_address, &address, &enable_skipping_invalid_signature)?;
+
         let is_address_zero = main_gate.is_zero(ctx, &address)?;
 
         // Ref. spec SignVerifyChip 3. Verify that the signed message in the ecdsa_chip
@@ -596,12 +617,10 @@ impl<F: Field> SignVerifyChip<F> {
 
         self.enable_keccak_lookup(config, ctx, &is_address_zero, &pk_rlc, &pk_hash_rlc)?;
 
-        offsets.insert("assign_signature_verify in the end".to_string(), ctx.offset());
-        println!("assign_signature_verify offsets {:?}", &offsets);
-
         Ok(AssignedSignatureVerify {
-            address,
+            address: address_returned,
             msg_hash_rlc,
+            is_invalid: main_gate.not(ctx, &assigned_ecdsa.is_valid)?,
         })
     }
 
@@ -656,7 +675,8 @@ impl<F: Field> SignVerifyChip<F> {
                         // padding (enabled when address == 0)
                         SignData::default()
                     };
-                    let assigned_ecdsa = self.assign_ecdsa(&mut ctx, &chips, &signature)?;
+                    let tx = txs.get(i).unwrap();
+                    let assigned_ecdsa = self.assign_ecdsa(&mut ctx, &chips, &signature, tx.enable_skipping_invalid_signature)?;
                     assigned_ecdsas.push(assigned_ecdsa);
                 }
                 Ok(assigned_ecdsas)
@@ -670,6 +690,7 @@ impl<F: Field> SignVerifyChip<F> {
                 let mut ctx = RegionCtx::new(region, 0);
                 for (i, assigned_ecdsa) in assigned_ecdsas.iter().enumerate() {
                     let sign_data = signatures.get(i); // None when padding (enabled when address == 0)
+                    let tx = txs.get(i).unwrap();
                     let assigned_sig_verif = self.assign_signature_verify(
                         config,
                         &mut ctx,
@@ -677,6 +698,7 @@ impl<F: Field> SignVerifyChip<F> {
                         sign_data,
                         assigned_ecdsa,
                         challenges,
+                        tx,
                     )?;
                     
                     assigned_sig_verifs.push(assigned_sig_verif);

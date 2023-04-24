@@ -130,8 +130,8 @@ pub struct Transaction {
     /// "s" value of the transaction signature
     pub s: Word,
 
-    /// True when the signature is invalid
-    pub invalid_signature: bool,
+    /// True when the invalid signature is skipped
+    pub enable_skipping_invalid_signature: bool,
 }
 
 impl From<&Transaction> for crate::Transaction {
@@ -171,7 +171,7 @@ impl From<&crate::Transaction> for Transaction {
             v: tx.v.as_u64(),
             r: tx.r,
             s: tx.s,
-            invalid_signature: false,
+            enable_skipping_invalid_signature: true,
         }
     }
 }

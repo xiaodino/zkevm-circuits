@@ -33,9 +33,6 @@ pub use halo2_proofs::halo2curves::{
     secp256k1::{self, Secp256k1Affine, Secp256k1Compressed},
 };
 
-use halo2_proofs::dev::{VerifyFailure, FailureLocation};
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt::{self, Debug};
 
 /// Config for TxCircuit
@@ -256,7 +253,7 @@ impl<F: Field> TxCircuit<F> {
                         ),
                         (
                             TxFieldTag::TxInvalid,
-                            Value::known(F::from(tx.invalid_signature as u64)),
+                            assigned_sig_verif.is_invalid.value().copied(),
                         ),
                     ] {
                         let assigned_cell =
@@ -266,6 +263,7 @@ impl<F: Field> TxCircuit<F> {
                         // Ref. spec 0. Copy constraints using fixed offsets between the tx rows and
                         // the SignVerifyChip
                         match tag {
+                            // TODO: need to update this constrain_equal when it's invalid signature
                             TxFieldTag::CallerAddress => region.constrain_equal(
                                 assigned_cell.cell(),
                                 assigned_sig_verif.address.cell(),
@@ -425,10 +423,7 @@ mod tx_circuit_tests {
         chain_id: u64,
         max_txs: usize,
         max_calldata: usize,
-        skip_invalid_signature: bool,
     ) -> Result<(), Vec<VerifyFailure>> {
-        let mut txs: Vec<Transaction> = txs.into();
-
         // SignVerifyChip -> ECDSAChip -> MainGate instance column
         let circuit = TxCircuit::<F>::new(max_txs, max_calldata, chain_id, txs);
 
@@ -459,7 +454,6 @@ mod tx_circuit_tests {
                 mock::MOCK_CHAIN_ID.as_u64(),
                 MAX_TXS,
                 MAX_CALLDATA,
-                true,
             ),
             Ok(())
         );
@@ -476,7 +470,7 @@ mod tx_circuit_tests {
 
         let k = 19;
         assert_eq!(
-            run::<Fr>(k, vec![tx], chain_id, MAX_TXS, MAX_CALLDATA, true),
+            run::<Fr>(k, vec![tx], chain_id, MAX_TXS, MAX_CALLDATA),
             Ok(())
         );
     }
@@ -497,32 +491,28 @@ mod tx_circuit_tests {
             mock::MOCK_CHAIN_ID.as_u64(),
             MAX_TXS,
             MAX_CALLDATA,
-            false,
         )
         .is_err(),);
     }
 
     #[test]
     fn tx_circuit_invalid_signature() {
-        let mut tx0 = mock::CORRECT_MOCK_TXS[0].clone();
-        tx0.v = Some(U64::one());
+        let tx0 = mock::CORRECT_MOCK_TXS[0].clone();
 
         let mut tx1 = mock::CORRECT_MOCK_TXS[1].clone();
         tx1.r = tx0.r;
+        tx1.enable_skipping_invalid_signature = true;
 
         let mut tx2 = mock::CORRECT_MOCK_TXS[2].clone();
         tx2.s = Some(U256::one());
+        tx2.enable_skipping_invalid_signature = true;
 
-        // invalid_signature(vec![tx0.clone()], 1, true);
-        invalid_signature(vec![tx1.clone()], 1, true);
-        // invalid_signature(vec![tx2.clone()], 1, true);
-
-        // invalid_signature(vec![tx0.clone()], 1, false);
-        // invalid_signature(vec![tx1.clone()], 1, false);
-        // invalid_signature(vec![tx2.clone()], 1, false);
+        invalid_signature(vec![tx0.clone()], 1);
+        invalid_signature(vec![tx1.clone()], 1);
+        invalid_signature(vec![tx2.clone()], 1);
     }
 
-    fn invalid_signature(mock_txs: Vec<MockTransaction>, max_txs: usize, skip_invalid_signature: bool) {
+    fn invalid_signature(mock_txs: Vec<MockTransaction>, max_txs: usize) {
         const MAX_CALLDATA: usize = 32;
 
         let txs = mock_txs.iter().map(|tx| Transaction::from(tx.clone())).collect();
@@ -533,13 +523,8 @@ mod tx_circuit_tests {
             mock::MOCK_CHAIN_ID.as_u64(),
             max_txs,
             MAX_CALLDATA,
-            skip_invalid_signature,
         );
-        if skip_invalid_signature {
-            assert_eq!(result, Ok(()));
-        } else {
-            assert!(result.is_err(),);
-        }
+        assert_eq!(result, Ok(()));
     }
 
 }
