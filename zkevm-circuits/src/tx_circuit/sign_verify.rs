@@ -35,7 +35,7 @@ use itertools::Itertools;
 use keccak256::plain::Keccak;
 use log::error;
 use maingate::{
-    AssignedValue, MainGate, MainGateConfig, MainGateInstructions, RangeChip, RangeConfig,
+    AssignedCondition, AssignedValue, MainGate, MainGateConfig, MainGateInstructions, RangeChip, RangeConfig,
     RangeInstructions, RegionCtx,
 };
 use num::Integer;
@@ -287,6 +287,7 @@ pub(crate) struct AssignedECDSA<F: Field> {
     pk_x_le: [AssignedValue<F>; 32],
     pk_y_le: [AssignedValue<F>; 32],
     msg_hash_le: [AssignedValue<F>; 32],
+    is_valid: AssignedCondition<F>,
 }
 
 #[derive(Debug)]
@@ -387,7 +388,7 @@ impl<F: Field> SignVerifyChip<F> {
         let pk_y_le = integer_to_bytes_le(ctx, range_chip, pk_y)?;
 
         // Ref. spec SignVerifyChip 4. Verify the ECDSA signature
-        ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash, offsets)?;
+        let is_ecdsa_signature_valid = ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash, offsets, true)?;
         println!("ecdsa offsets {:?}", offsets);
 
         // TODO: Update once halo2wrong suports the following methods:
@@ -398,6 +399,7 @@ impl<F: Field> SignVerifyChip<F> {
             pk_x_le,
             pk_y_le,
             msg_hash_le,
+            is_valid: is_ecdsa_signature_valid,
         })
     }
 
@@ -662,11 +664,6 @@ impl<F: Field> SignVerifyChip<F> {
                 let mut ctx = RegionCtx::new(region, 0);
                 for (i, assigned_ecdsa) in assigned_ecdsas.iter().enumerate() {
                     let sign_data = signatures.get(i); // None when padding (enabled when address == 0)
-                    let tx = txs.get(i);
-                    // invalid_signature 
-                    if tx.map(|x| x.invalid_signature) == Some(true) {
-                        continue;
-                    }
                     let assigned_sig_verif = self.assign_signature_verify(
                         config,
                         &mut ctx,
