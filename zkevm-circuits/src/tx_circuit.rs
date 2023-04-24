@@ -351,10 +351,9 @@ impl<F: Field> SubCircuit<F> for TxCircuit<F> {
 
         config.load_aux_tables(layouter)?;
 
-        let mut offsets: HashMap<String, usize> = HashMap::new();
         let assigned_sig_verifs =
             self.sign_verify
-                .assign(&config.sign_verify, layouter, &sign_datas, challenges, &self.txs, &mut offsets)?;
+                .assign(&config.sign_verify, layouter, &sign_datas, challenges, &self.txs)?;
 
         self.assign_tx_table(config, challenges, layouter, assigned_sig_verifs)?;
         Ok(())
@@ -509,13 +508,13 @@ mod tx_circuit_tests {
         tx0.v = Some(U64::one());
 
         let mut tx1 = mock::CORRECT_MOCK_TXS[1].clone();
-        tx1.r = Some(U256::one());
+        tx1.r = tx0.r;
 
         let mut tx2 = mock::CORRECT_MOCK_TXS[2].clone();
         tx2.s = Some(U256::one());
 
-        invalid_signature(vec![tx0.clone()], 1, true);
-        // invalid_signature(vec![tx1.clone()], 1, true);
+        // invalid_signature(vec![tx0.clone()], 1, true);
+        invalid_signature(vec![tx1.clone()], 1, true);
         // invalid_signature(vec![tx2.clone()], 1, true);
 
         // invalid_signature(vec![tx0.clone()], 1, false);

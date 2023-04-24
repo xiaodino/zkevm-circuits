@@ -346,7 +346,6 @@ impl<F: Field> SignVerifyChip<F> {
         ctx: &mut RegionCtx<F>,
         chips: &ChipsRef<F, NUMBER_OF_LIMBS, BIT_LEN_LIMB>,
         sign_data: &SignData,
-        offsets: &mut HashMap<String, usize>,
     ) -> Result<AssignedECDSA<F>, Error> {
         let SignData {
             signature,
@@ -388,7 +387,9 @@ impl<F: Field> SignVerifyChip<F> {
         let pk_y_le = integer_to_bytes_le(ctx, range_chip, pk_y)?;
 
         // Ref. spec SignVerifyChip 4. Verify the ECDSA signature
-        let is_ecdsa_signature_valid = ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash, offsets, true)?;
+        let enable_skipping_invalid_signature = false;
+        let mut offsets:HashMap<String, usize> = HashMap::new();
+        let is_ecdsa_signature_valid = ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash, &mut offsets, enable_skipping_invalid_signature)?;
         println!("ecdsa offsets {:?}", offsets);
 
         // TODO: Update once halo2wrong suports the following methods:
@@ -485,6 +486,9 @@ impl<F: Field> SignVerifyChip<F> {
         assigned_ecdsa: &AssignedECDSA<F>,
         challenges: &Challenges<Value<F>>,
     ) -> Result<AssignedSignatureVerify<F>, Error> {
+        let mut offsets:HashMap<String, usize> = HashMap::new();
+        offsets.insert("assign_signature_verify at begin".to_string(), ctx.offset());
+
         let main_gate = chips.main_gate;
 
         let (padding, sign_data) = match sign_data {
@@ -592,6 +596,9 @@ impl<F: Field> SignVerifyChip<F> {
 
         self.enable_keccak_lookup(config, ctx, &is_address_zero, &pk_rlc, &pk_hash_rlc)?;
 
+        offsets.insert("assign_signature_verify in the end".to_string(), ctx.offset());
+        println!("assign_signature_verify offsets {:?}", &offsets);
+
         Ok(AssignedSignatureVerify {
             address,
             msg_hash_rlc,
@@ -605,7 +612,6 @@ impl<F: Field> SignVerifyChip<F> {
         signatures: &[SignData],
         challenges: &Challenges<Value<F>>,
         txs: &Vec<Transaction>,
-        offsets: &mut HashMap<String, usize>,
     ) -> Result<Vec<AssignedSignatureVerify<F>>, Error> {
         if signatures.len() > self.max_verif {
             error!(
@@ -650,7 +656,7 @@ impl<F: Field> SignVerifyChip<F> {
                         // padding (enabled when address == 0)
                         SignData::default()
                     };
-                    let assigned_ecdsa = self.assign_ecdsa(&mut ctx, &chips, &signature, offsets)?;
+                    let assigned_ecdsa = self.assign_ecdsa(&mut ctx, &chips, &signature)?;
                     assigned_ecdsas.push(assigned_ecdsa);
                 }
                 Ok(assigned_ecdsas)
@@ -672,7 +678,9 @@ impl<F: Field> SignVerifyChip<F> {
                         assigned_ecdsa,
                         challenges,
                     )?;
+                    
                     assigned_sig_verifs.push(assigned_sig_verif);
+
                 }
                 Ok(assigned_sig_verifs)
             },
@@ -755,14 +763,12 @@ mod sign_verify_tests {
         ) -> Result<(), Error> {
             let challenges = config.challenges.values(&mut layouter);
             let tx_default = Transaction::default();
-            let mut offsets: HashMap<String, usize> = HashMap::new();
             self.sign_verify.assign(
                 &config.sign_verify,
                 &mut layouter,
                 &self.signatures,
                 &challenges,
                 &vec![tx_default],
-                &mut offsets,
             )?;
             config.sign_verify.keccak_table.dev_load(
                 &mut layouter,
