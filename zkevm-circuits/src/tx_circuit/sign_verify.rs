@@ -40,7 +40,6 @@ use maingate::{
 };
 use num::Integer;
 use std::{iter, marker::PhantomData};
-use std::collections::HashMap;
 
 /// Auxiliary Gadget to verify a that a message hash is signed by the public
 /// key corresponding to an Ethereum Address.
@@ -389,9 +388,7 @@ impl<F: Field> SignVerifyChip<F> {
         let pk_y_le = integer_to_bytes_le(ctx, range_chip, pk_y)?;
 
         // Ref. spec SignVerifyChip 4. Verify the ECDSA signature
-        let mut offsets:HashMap<String, usize> = HashMap::new();
-        let is_ecdsa_signature_valid = ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash, &mut offsets, enable_skipping_invalid_signature)?;
-        println!("ecdsa offsets {:?}", offsets);
+        let is_ecdsa_signature_valid = ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash, enable_skipping_invalid_signature)?;
 
         // TODO: Update once halo2wrong suports the following methods:
         // - `IntegerChip::assign_integer_from_bytes_le`

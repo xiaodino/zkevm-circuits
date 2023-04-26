@@ -1286,10 +1286,10 @@ dependencies = [
 [[package]]
 name = "ecc"
 version = "0.1.0"
-source = "git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906#ba206aee8932c6ae4b63565e3c937e4d8d666906"
+source = "git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6#aba38c4abc15fcee7fd4c2b973017aa848cd4ac6"
 dependencies = [
  "group",
- "integer 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906)",
+ "integer 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6)",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -1300,9 +1300,9 @@ dependencies = [
 [[package]]
 name = "ecdsa"
 version = "0.1.0"
-source = "git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906#ba206aee8932c6ae4b63565e3c937e4d8d666906"
+source = "git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6#aba38c4abc15fcee7fd4c2b973017aa848cd4ac6"
 dependencies = [
- "ecc 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906)",
+ "ecc 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6)",
  "group",
  "num-bigint",
  "num-integer",
@@ -1462,6 +1462,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "libsecp256k1",
+ "log",
  "num",
  "num-bigint",
  "regex",
@@ -2333,7 +2334,7 @@ dependencies = [
 [[package]]
 name = "halo2wrong"
 version = "0.1.0"
-source = "git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906#ba206aee8932c6ae4b63565e3c937e4d8d666906"
+source = "git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6#aba38c4abc15fcee7fd4c2b973017aa848cd4ac6"
 dependencies = [
  "group",
  "halo2_proofs 0.2.0",
@@ -2688,10 +2689,10 @@ dependencies = [
 [[package]]
 name = "integer"
 version = "0.1.0"
-source = "git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906#ba206aee8932c6ae4b63565e3c937e4d8d666906"
+source = "git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6#aba38c4abc15fcee7fd4c2b973017aa848cd4ac6"
 dependencies = [
  "group",
- "maingate 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906)",
+ "maingate 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6)",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -2988,10 +2989,10 @@ dependencies = [
 [[package]]
 name = "maingate"
 version = "0.1.0"
-source = "git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906#ba206aee8932c6ae4b63565e3c937e4d8d666906"
+source = "git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6#aba38c4abc15fcee7fd4c2b973017aa848cd4ac6"
 dependencies = [
  "group",
- "halo2wrong 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906)",
+ "halo2wrong 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6)",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -5423,7 +5424,7 @@ dependencies = [
  "bytes",
  "criterion",
  "ctor",
- "ecc 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906)",
+ "ecc 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6)",
  "ecdsa 0.1.0",
  "env_logger",
  "eth-types",
@@ -5432,13 +5433,13 @@ dependencies = [
  "gadgets",
  "halo2_proofs 0.2.0",
  "hex",
- "integer 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906)",
+ "integer 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6)",
  "itertools",
  "keccak256",
  "lazy_static",
  "libsecp256k1",
  "log",
- "maingate 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=ba206aee8932c6ae4b63565e3c937e4d8d666906)",
+ "maingate 0.1.0 (git+https://github.com/xiaodino/halo2wrong?rev=aba38c4abc15fcee7fd4c2b973017aa848cd4ac6)",
  "mock",
  "num",
  "num-bigint",

@@ -409,7 +409,7 @@ impl<F: Field> Circuit<F> for TxCircuit<F> {
 #[cfg(test)]
 mod tx_circuit_tests {
     use super::*;
-    use eth_types::{address, U64, U256};
+    use eth_types::{address, U256};
     use halo2_proofs::{
         dev::{MockProver, VerifyFailure},
         halo2curves::bn256::Fr,
@@ -500,11 +500,11 @@ mod tx_circuit_tests {
         let tx0 = mock::CORRECT_MOCK_TXS[0].clone();
 
         let mut tx1 = mock::CORRECT_MOCK_TXS[1].clone();
-        tx1.r = tx0.r;
+        tx1.r = tx1.s;
         tx1.enable_skipping_invalid_signature = true;
 
         let mut tx2 = mock::CORRECT_MOCK_TXS[2].clone();
-        tx2.s = Some(U256::one());
+        tx2.s = tx2.r;
         tx2.enable_skipping_invalid_signature = true;
 
         invalid_signature(vec![tx0.clone()], 1);
