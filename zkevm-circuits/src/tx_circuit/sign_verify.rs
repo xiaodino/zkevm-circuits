@@ -505,7 +505,6 @@ impl<F: Field> SignVerifyChip<F> {
             .map(|byte| Value::known(F::from(byte as u64)));
         let pk_hash_hi = pk_hash[..12].to_vec();
 
-        // TODO: How to deal with this when it's invalid signature?
         // Ref. spec SignVerifyChip 2. Verify that the first 20 bytes of the
         // pub_key_hash equal the address
         let (address, pk_hash_lo) = {
