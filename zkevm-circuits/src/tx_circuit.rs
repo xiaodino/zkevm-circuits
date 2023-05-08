@@ -20,6 +20,7 @@ use halo2_proofs::{
 };
 use itertools::Itertools;
 use log::error;
+use log;
 use sign_verify::{AssignedSignatureVerify, SignVerifyChip, SignVerifyConfig};
 use std::marker::PhantomData;
 
@@ -31,6 +32,8 @@ pub use halo2_proofs::halo2curves::{
     },
     secp256k1::{self, Secp256k1Affine, Secp256k1Compressed},
 };
+
+use std::fmt::{self, Debug};
 
 /// Config for TxCircuit
 #[derive(Clone, Debug)]
@@ -248,6 +251,10 @@ impl<F: Field> TxCircuit<F> {
                             TxFieldTag::TxSignHash,
                             assigned_sig_verif.msg_hash_rlc.value().copied(),
                         ),
+                        (
+                            TxFieldTag::TxInvalid,
+                            assigned_sig_verif.is_invalid.value().copied(),
+                        ),
                     ] {
                         let assigned_cell =
                             config.assign_row(&mut region, offset, i + 1, tag, 0, value)?;
@@ -340,9 +347,11 @@ impl<F: Field> SubCircuit<F> for TxCircuit<F> {
             .try_collect()?;
 
         config.load_aux_tables(layouter)?;
+
         let assigned_sig_verifs =
             self.sign_verify
-                .assign(&config.sign_verify, layouter, &sign_datas, challenges)?;
+                .assign(&config.sign_verify, layouter, &sign_datas, challenges, &self.txs)?;
+
         self.assign_tx_table(config, challenges, layouter, assigned_sig_verifs)?;
         Ok(())
     }
@@ -399,12 +408,12 @@ impl<F: Field> Circuit<F> for TxCircuit<F> {
 #[cfg(test)]
 mod tx_circuit_tests {
     use super::*;
-    use eth_types::address;
+    use eth_types::{address, U256};
     use halo2_proofs::{
         dev::{MockProver, VerifyFailure},
         halo2curves::bn256::Fr,
     };
-    use mock::AddrOrWallet;
+    use mock::{AddrOrWallet, MockTransaction};
     use pretty_assertions::assert_eq;
 
     fn run<F: Field>(
@@ -419,7 +428,10 @@ mod tx_circuit_tests {
 
         let prover = match MockProver::run(k, &circuit, vec![vec![]]) {
             Ok(prover) => prover,
-            Err(e) => panic!("{:#?}", e),
+            Err(e) => {
+                eprintln!("Error: {:#?}", e); // Print error to standard error stream
+                panic!("Failed to create prover");
+            }
         };
         prover.verify()
     }
@@ -440,7 +452,7 @@ mod tx_circuit_tests {
                     .collect_vec(),
                 mock::MOCK_CHAIN_ID.as_u64(),
                 MAX_TXS,
-                MAX_CALLDATA
+                MAX_CALLDATA,
             ),
             Ok(())
         );
@@ -477,8 +489,41 @@ mod tx_circuit_tests {
             vec![tx.into()],
             mock::MOCK_CHAIN_ID.as_u64(),
             MAX_TXS,
-            MAX_CALLDATA
+            MAX_CALLDATA,
         )
         .is_err(),);
     }
+
+    #[test]
+    fn tx_circuit_invalid_signature() {
+        let tx0 = mock::CORRECT_MOCK_TXS[0].clone();
+
+        let mut tx1 = mock::CORRECT_MOCK_TXS[1].clone();
+        tx1.r = tx1.s;
+        tx1.enable_skipping_invalid_signature = true;
+
+        let mut tx2 = mock::CORRECT_MOCK_TXS[2].clone();
+        tx2.s = tx2.r;
+        tx2.enable_skipping_invalid_signature = true;
+
+        invalid_signature(vec![tx0.clone()], 1);
+        invalid_signature(vec![tx1.clone()], 1);
+        invalid_signature(vec![tx2.clone()], 1);
+    }
+
+    fn invalid_signature(mock_txs: Vec<MockTransaction>, max_txs: usize) {
+        const MAX_CALLDATA: usize = 32;
+
+        let txs = mock_txs.iter().map(|tx| Transaction::from(tx.clone())).collect();
+        let k = 20;
+        let result = run::<Fr>(
+            k,
+            txs,
+            mock::MOCK_CHAIN_ID.as_u64(),
+            max_txs,
+            MAX_CALLDATA,
+        );
+        assert_eq!(result, Ok(()));
+    }
+
 }
