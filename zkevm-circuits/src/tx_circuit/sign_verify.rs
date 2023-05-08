@@ -15,7 +15,7 @@ use ecdsa::ecdsa::{AssignedEcdsaSig, AssignedPublicKey, EcdsaChip};
 
 use eth_types::sign_types::{pk_bytes_le, pk_bytes_swap_endianness, SignData};
 use eth_types::geth_types::Transaction;
-use eth_types::{self, Field};
+use eth_types::{self, address, Field};
 use halo2_proofs::{
     arithmetic::{CurveAffine, FieldExt},
     circuit::{AssignedCell, Cell, Layouter, Value},
@@ -530,8 +530,9 @@ impl<F: Field> SignVerifyChip<F> {
             )
         };
 
-        let tx_address = {
-            let tx_from_fixed_bytes = tx.from.to_fixed_bytes().map(|byte| Value::known(F::from(byte as u64)));
+        let zero_address = {
+            let zero_zddress = address!("0x0000000000000000000000000000000000000000");
+            let tx_from_fixed_bytes = zero_zddress.to_fixed_bytes().map(|byte| Value::known(F::from(byte as u64)));
             let powers_of_256 =
                 iter::successors(Some(F::one()), |coeff| Some(F::from(256) * coeff))
                     .take(20)
@@ -547,7 +548,7 @@ impl<F: Field> SignVerifyChip<F> {
         };
 
         let enable_skipping_invalid_signature = main_gate.assign_constant(ctx, F::from(tx.enable_skipping_invalid_signature))?;
-        let address_returned: AssignedCell<F, F> = main_gate.select(ctx, &tx_address, &address, &enable_skipping_invalid_signature)?;
+        let address_returned: AssignedCell<F, F> = main_gate.select(ctx, &zero_address, &address, &enable_skipping_invalid_signature)?;
 
         let is_address_zero = main_gate.is_zero(ctx, &address)?;
 
